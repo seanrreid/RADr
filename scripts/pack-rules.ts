@@ -78,16 +78,23 @@ interface TestReport {
   config_with_errors?: unknown[];
 }
 
-/** `opengrep test` one rule against its fixtures: pass | invalid | failing | untested. */
-export async function testRule(opengrep: string, rule: string, fixtures: readonly string[]): Promise<"pass" | "invalid" | "failing" | "untested"> {
+/**
+ * `opengrep test` one rule against its fixtures: pass | invalid | failing | untested.
+ * `explain`, when given, receives why a rule is invalid (exec outcome, exit code, stderr tail).
+ */
+export async function testRule(opengrep: string, rule: string, fixtures: readonly string[], explain?: (why: string) => void): Promise<"pass" | "invalid" | "failing" | "untested"> {
   const r = await run({ command: opengrep, args: ["test", "--json", "--config", rule, ...fixtures], cwd: path.dirname(rule), env: { HOME: tmpdir() }, timeoutMs: 120_000, okExitCodes: [0, 1, 2, 7] });
+  const why = (what: string): "invalid" => {
+    explain?.(`${what}; outcome=${r.outcome} exit=${String(r.exitCode)} signal=${String(r.signal)}; stderr: ${r.stderr.toString().trim().slice(-600)}`);
+    return "invalid";
+  };
   let rep: TestReport;
   try {
     rep = JSON.parse(r.stdout.toString()) as TestReport;
   } catch {
-    return "invalid";
+    return why("stdout is not JSON");
   }
-  if ((rep.config_with_errors ?? []).length > 0 || r.exitCode === 7) return "invalid";
+  if ((rep.config_with_errors ?? []).length > 0 || r.exitCode === 7) return why("config errors");
   const checks = Object.values(rep.results ?? {}).flatMap((x) => Object.values(x.checks));
   if (checks.length === 0) return "untested";
   if (checks.some((c) => !c.passed)) return "failing";

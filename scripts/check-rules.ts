@@ -76,6 +76,7 @@ async function main(): Promise<void> {
   if (opengrep !== undefined && errors.length === 0) {
     // Rule tests are independent: run them CONCURRENCY at a time; report in rule order.
     const verdicts = new Array<string>(rules.length);
+    const reasons = new Array<string>(rules.length);
     let next = 0;
     const worker = async (): Promise<void> => {
       for (let i = next++; i < rules.length; i = next++) {
@@ -84,11 +85,11 @@ async function main(): Promise<void> {
         const abs = path.join(root, r.path);
         const stem = abs.replace(/\.ya?ml$/, "");
         const fixtures = readdirSync(path.dirname(abs)).map((n) => path.join(path.dirname(abs), n)).filter((f) => f !== abs && f.startsWith(`${stem}.`) && !/\.ya?ml$/.test(f));
-        verdicts[i] = await testRule(opengrep, abs, fixtures);
+        verdicts[i] = await testRule(opengrep, abs, fixtures, (why) => { reasons[i] = why; });
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    rules.forEach((r, i) => { if (verdicts[i] !== "pass") errors.push(`${r.path}: fixtures ${verdicts[i] ?? "not run"}`); });
+    rules.forEach((r, i) => { if (verdicts[i] !== "pass") errors.push(`${r.path}: fixtures ${verdicts[i] ?? "not run"}${reasons[i] === undefined ? "" : ` (${reasons[i]})`}`); });
   }
   for (const e of errors) process.stderr.write(`check-rules: ${e}\n`);
   if (errors.length > 0) process.exit(1);
