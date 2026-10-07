@@ -30,6 +30,8 @@ export interface Layout {
   readonly cache: string;
   readonly findings: string;
   readonly artifacts: string;
+  /** Every prompt and response sent to the agent (PRD §8, §9). */
+  readonly llm: string;
 }
 
 export function layout(home: string, id: string): Layout {
@@ -49,6 +51,7 @@ export function layout(home: string, id: string): Layout {
     cache: path.join(dir, "cache"),
     findings: path.join(dir, "findings.jsonl"),
     artifacts: path.join(dir, "artifacts"),
+    llm: path.join(dir, "llm"),
   };
 }
 

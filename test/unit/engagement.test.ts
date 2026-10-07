@@ -11,7 +11,6 @@ import { layout, resolveEngagement } from "../../src/engagement/home.js";
 import { initEngagement } from "../../src/engagement/init.js";
 import { normalizeOrigin } from "../../src/engagement/scope.js";
 import { checkoutWorktree, mirrorSource, resolveSha, setWritable, verifyWorktree } from "../../src/engagement/source.js";
-import { invokeAgent } from "../../src/llm/policy.js";
 import { EventLog } from "../../src/state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../../src/state/fingerprint.js";
 import { Gates } from "../../src/state/gates.js";
@@ -162,10 +161,13 @@ client_licenses: []
   it("accepts a valid doc", () => {
     assert.equal(parseEngagement(base, "e.yml").client, "acme");
   });
-  it("rejects unknown keys, unknown lanes, and not-yet-available policies", () => {
+  it("accepts every LLM policy (M4)", () => {
+    for (const p of ["off", "metadata-only", "code-allowed"]) assert.equal(parseEngagement(base.replace("llm_policy: off", `llm_policy: ${p}`), "e.yml").llm_policy, p);
+  });
+  it("rejects unknown keys, unknown lanes, and unknown policies", () => {
     assert.throws(() => parseEngagement(`${base}surprise: 1\n`, "e.yml"), /surprise/);
     assert.throws(() => parseEngagement(base.replace("lanes: [lint]", "lanes: [fuzz]"), "e.yml"), UsageError);
-    assert.throws(() => parseEngagement(base.replace("llm_policy: off", "llm_policy: code-allowed"), "e.yml"), /M4/);
+    assert.throws(() => parseEngagement(base.replace("llm_policy: off", "llm_policy: everything"), "e.yml"), UsageError);
     assert.throws(() => parseEngagement(base.replace("mode: offline, enforcement: declared", "mode: network, enforcement: container"), "e.yml"), /requires network mode "offline"/);
   });
 });
@@ -274,7 +276,4 @@ describe("helpers", () => {
     assert.equal(normalizeOrigin("rel/repo"), path.resolve("rel/repo"));
   });
 
-  it("LLM policy off refuses before any process is spawned (T2.6)", async () => {
-    await assert.rejects(invokeAgent("off", { purpose: "triage", prompt: "x" }), /policy is "off"/);
-  });
 });

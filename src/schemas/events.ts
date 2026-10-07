@@ -73,6 +73,22 @@ const PAYLOADS = {
     // dispositions_hash is NOT required: it was added after the first approvals were recorded.
     ["run_id", "findings_set_hash", "report_hash", "remediation_hash", "theme", "theme_hash"],
   ),
+  // One agent invocation (PRD §9). The prompt and response files under llm/ hash to these values.
+  "llm-call": obj(
+    {
+      call_id: { type: "string", pattern: "^L-[0-9]{4,}$" },
+      purpose: { type: "string", pattern: SLUG },
+      policy: { enum: ["metadata-only", "code-allowed"] },
+      attempt: { type: "integer", minimum: 1 },
+      argv_hash: sha,
+      prompt_hash: sha,
+      response_hash: sha,
+      outcome: str,
+      action: str,
+      detail: { type: "string" },
+    },
+    ["call_id", "purpose", "policy", "attempt", "argv_hash", "prompt_hash", "response_hash", "outcome", "action"],
+  ),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: "^F-[0-9]{4,}$" }, from: str, to: str, reason: { type: "string" } },
     ["finding_id", "from", "to"],

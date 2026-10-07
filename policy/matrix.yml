@@ -19,9 +19,11 @@
 #   timeout       a tool hit its time limit (a safety net, never a scope bound)
 #   output-cap    a tool exceeded the output cap (killed, never silently truncated)
 #   parse-error   output didn't match its adapter's expected format (raw output is kept)
+#   fail-protocol the agent's response didn't validate against its schema (PRD §9; llm row only,
+#                 tool lanes never produce it)
 
 version: 1
-outcomes: [success, tool-missing, version-drift, tool-error, timeout, output-cap, parse-error]
+outcomes: [success, tool-missing, version-drift, tool-error, timeout, output-cap, parse-error, fail-protocol]
 actions: [continue, retry, partial, abort]
 
 table:
@@ -33,6 +35,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   lint:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -41,6 +44,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   secrets:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -49,6 +53,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   sca:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -57,6 +62,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   history:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -65,6 +71,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   tests:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -73,6 +80,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   # Sandboxed lanes (run client code). A failed install is a FINDING, not an outcome.
   types:
     success:       { action: continue }
@@ -82,6 +90,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   coverage:
     success:       { action: continue }
     tool-missing:  { action: partial }
@@ -90,6 +99,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   sast:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -98,6 +108,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   # M3 health lanes. maint reads census's file list, so it runs after census.
   maint:
     success:       { action: continue }
@@ -107,6 +118,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   # license reads the sca lane's SBOM for dependency licenses, so it runs after sca.
   license:
     success:       { action: continue }
@@ -116,6 +128,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   iac:
     success:       { action: continue }
     tool-missing:  { action: abort }
@@ -124,6 +137,7 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+    fail-protocol: { action: partial }
   # Optional lane (PRD §14): its gaps are reported but never block the run or Gate 2.
   hygiene:
     success:       { action: continue }
@@ -133,3 +147,15 @@ table:
     timeout:       { action: continue }
     output-cap:    { action: continue }
     parse-error:   { action: continue }
+    fail-protocol: { action: continue }
+  # The LLM lane (M4): one row for every agent call (`radr triage`, `radr address --draft`).
+  # Not a review lane: `radr review` never runs it. Retries are bounded; then the step is partial.
+  llm:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: retry, max_attempts: 2, then: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+    fail-protocol: { action: retry, max_attempts: 2, then: partial }

@@ -94,9 +94,6 @@ const validate = makeValidator<EngagementDoc>(
 
 export function parseEngagement(text: string, source: string): EngagementDoc {
   const doc = validate(parseYaml(text, source), source);
-  if (doc.llm_policy !== "off") {
-    throw new UsageError(`${source}: llm_policy "${doc.llm_policy}" is not available until M4; use "off"`);
-  }
   if (doc.tier === "triage") {
     const same = doc.lanes.length === TRIAGE_LANES.length && TRIAGE_LANES.every((x) => doc.lanes.includes(x));
     if (!same) throw new UsageError(`${source}: the triage tier runs a fixed lane set: [${TRIAGE_LANES.join(", ")}]`);

@@ -25,6 +25,8 @@ export interface ExecRequest {
   readonly maxOutputBytes?: number;
   /** Exit codes that count as a valid run (e.g. gitleaks exits 1 when it finds leaks). Default [0]. */
   readonly okExitCodes?: readonly number[];
+  /** Written to the child's stdin, which is then closed. Default: no stdin. */
+  readonly stdin?: string;
 }
 
 export type ExecOutcome = "ok" | "nonzero-exit" | "timeout" | "output-cap" | "tool-missing" | "spawn-error";
@@ -76,8 +78,13 @@ export function run(req: ExecRequest): Promise<ExecResult> {
       cwd: req.cwd,
       env: buildEnv(req),
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [req.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (req.stdin !== undefined && child.stdin !== null) {
+      // A child that exits without reading its input is judged by its exit code, not by EPIPE.
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(req.stdin);
+    }
 
     const kill = (): void => {
       child.kill("SIGTERM");
@@ -98,8 +105,9 @@ export function run(req: ExecRequest): Promise<ExecResult> {
       }
       sink.push(chunk);
     };
-    child.stdout.on("data", collect(out));
-    child.stderr.on("data", collect(err));
+    // stdout/stderr are always "pipe" (see stdio above), so they exist.
+    child.stdout?.on("data", collect(out));
+    child.stderr?.on("data", collect(err));
 
     const finish = (partial: Pick<ExecResult, "outcome" | "exitCode" | "signal"> & { error?: string }): void => {
       if (settled) return;
