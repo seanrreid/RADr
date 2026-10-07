@@ -11,7 +11,7 @@ import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type ToolRun } from
 import { bin, combine, realWorktree, snippetReader, step, type StepOutcome } from "./steps.js";
 import { hygiene, iac, license, maint } from "./health.js";
 import { history, tests } from "./metrics.js";
-import { coverage, eslintProject, types } from "./sandboxed.js";
+import { coverage, eslintProject, stackLint, types } from "./sandboxed.js";
 
 export const census: Lane = {
   id: "census",
@@ -65,6 +65,9 @@ export const lint: Lane = {
         }),
         (raw, ref) => ruffAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["ruff"] ?? "", snippet: read })));
     }
+    // M3 W5: golangci-lint, clippy, PMD, RuboCop, .NET analyzers run in the stack sandboxes
+    // (they need the stack's toolchain). Triage stays static-only.
+    if (ctx.doc.tier !== "triage") steps.push(...(await stackLint(ctx)));
     return combine(steps);
   },
 };

@@ -53,7 +53,7 @@ const validateImages = makeValidator<SandboxImages>(
       images: { type: "object", additionalProperties: {
         type: "object", additionalProperties: false, required: ["ref", "tag", "purpose", "platforms"],
         properties: {
-          ref: { type: "string", pattern: "^docker\\.io/[a-z0-9/._-]+@sha256:[0-9a-f]{64}$" },
+          ref: { type: "string", pattern: "^(docker\\.io|mcr\\.microsoft\\.com)/[a-z0-9/._-]+@sha256:[0-9a-f]{64}$" },
           tag: { type: "string" }, purpose: { type: "string" }, platforms: { type: "array", items: { type: "string" } },
         },
       } },
@@ -73,9 +73,13 @@ export function imageRef(name: string): string {
 }
 
 /** Pull pinned images (network). Called by `radr tools install` when a runtime exists. */
+/** Images every install pulls; stack bases are pulled on demand (`radr deps warm`, `build-image --stack`). */
+export const DEFAULT_PULL: readonly string[] = ["node", "python"];
+
 export async function pullImages(rt: Runtime): Promise<Record<string, "pulled" | "present">> {
   const out: Record<string, "pulled" | "present"> = {};
   for (const [name, img] of Object.entries(loadSandboxImages().images)) {
+    if (!DEFAULT_PULL.includes(name)) continue;
     const exists = await run({ command: rt.name, args: ["image", "inspect", "--format", "{{.Id}}", img.ref], cwd: "/", inheritEnv: RUNTIME_ENV });
     if (exists.outcome === "ok") {
       out[name] = "present";
@@ -201,9 +205,10 @@ export async function runSandbox(req: SandboxRequest, outDir: string): Promise<S
 }
 
 /** The toolchain.lock entry for a runtime: what the scope fingerprint pins about the sandbox. */
-export function sandboxLockEntry(rt: Runtime | undefined): { runtime: string; version: string; images: Record<string, string> } | null {
+export function sandboxLockEntry(rt: Runtime | undefined, stackImages: Readonly<Record<string, string>> = {}): { runtime: string; version: string; images: Record<string, string> } | null {
   if (rt === undefined) return null;
-  const images: Record<string, string> = {};
+  // Stack images (M3 W5) are content-addressed tags: a pin change shows up here as drift.
+  const images: Record<string, string> = Object.fromEntries(Object.entries(stackImages).map(([k, v]) => [`stack:${k}`, v]));
   for (const [name, img] of Object.entries(loadSandboxImages().images)) images[name] = img.ref;
   return { runtime: rt.name, version: rt.version, images };
 }

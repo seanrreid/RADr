@@ -1,0 +1,1 @@
+{"totals":{"errors":0,"file_errors":1},"files":{"/tmp/work/php-svc/src/Greeter.php":{"errors":1,"messages":[{"message":"Method Acme\\Greeter::count() should return int but returns string.","line":9,"ignorable":true,"identifier":"return.type"}]}},"errors":[]}

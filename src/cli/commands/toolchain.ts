@@ -10,6 +10,8 @@ import { loadManifest } from "../../toolchain/manifest.js";
 import { listContext, syncContext } from "../../toolchain/vulnctx.js";
 import { detectRuntime, pullImages } from "../../sandbox/runtime.js";
 import { buildImage } from "../../toolchain/image.js";
+import { ensureStackImage } from "../../sandbox/stack-images.js";
+import { DRIVER_STACKS } from "../../sandbox/stacks.js";
 import { ruleCoverage } from "../../rules/pack.js";
 import { canonicalJson } from "../../core/determinism.js";
 import { warmDeps } from "../../sandbox/deps.js";
@@ -19,13 +21,22 @@ import type { CommandSpec } from "../context.js";
 
 export const tools: CommandSpec = {
   name: "tools",
-  usage: "radr tools install [--tool <name>] | radr tools build-image",
+  usage: "radr tools install [--tool <name>] | radr tools build-image [--stack <name>]...",
   summary: "install the pinned toolchain, or build the container toolchain image (network)",
   async run(args, ctx) {
-    const { values, positionals } = parse(args, { tool: { type: "string" } }, 1);
+    const { values, positionals } = parse(args, { tool: { type: "string" }, stack: { type: "string", multiple: true } }, 1);
     if (positionals[0] === "build-image") {
       const rt = await detectRuntime(ctx.env);
       if (rt === undefined) throw new RefusedError("no container runtime reachable (start Podman or Docker)");
+      if (values.stack !== undefined) {
+        // Stack sandbox images (M3 W5); `radr deps warm` also builds the ones a recipe needs.
+        for (const s of values.stack) {
+          if (!(DRIVER_STACKS as readonly string[]).includes(s)) throw new UsageError(`unknown stack "${s}" (known: ${DRIVER_STACKS.join(", ")})`);
+          const sdks: readonly ("8.0" | "10.0")[] = s === "csharp" ? ["8.0", "10.0"] : ["8.0"];
+          for (const sdk of sdks) ctx.out(`${s.padEnd(12)} ${await ensureStackImage(radrHome(ctx.env), rt, s, ctx.out, sdk)}`);
+        }
+        return;
+      }
       for (const [image, s] of Object.entries(await pullImages(rt))) ctx.out(`${`image:${image}`.padEnd(12)} ${s} (${rt.name})`);
       const img = await buildImage(radrHome(ctx.env), rt, ctx.out);
       ctx.out(`${img.reused ? "up to date" : "built"}: ${img.tag}`);
@@ -67,7 +78,7 @@ export const deps: CommandSpec = {
     const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
     const rt = await detectRuntime(ctx.env);
     if (rt === undefined) throw new RefusedError("no container runtime reachable (start Podman or Docker)");
-    const snap = await warmDeps(home, l, loadEngagement(l.engagementYml), rt, ctx.clock);
+    const snap = await warmDeps(home, l, loadEngagement(l.engagementYml), rt, ctx.clock, ctx.out);
     ctx.out(`deps snapshot ${snap.id} (${snap.stacks.join(", ")}; ${snap.files} files); pinned by the next \`radr scope\``);
   },
 };

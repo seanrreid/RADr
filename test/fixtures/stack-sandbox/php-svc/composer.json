@@ -1,0 +1,5 @@
+{
+    "name": "acme/svc",
+    "require": { "php": ">=8.2", "psr/log": "3.0.2" },
+    "autoload": { "psr-4": { "Acme\\": "src/" } }
+}

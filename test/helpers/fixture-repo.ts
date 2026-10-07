@@ -6,8 +6,9 @@
 //   c2 "add deploy config" adds config/deploy.env containing a fake AWS access key id
 //   c3 "remove secret"     deletes config/deploy.env → the secret exists ONLY in history
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
 
 // Assembled at runtime so no secret-shaped literal appears in this repository's own source
@@ -297,5 +298,20 @@ export async function makePolyglotFixtureRepo(dir: string): Promise<FixtureRepo>
   for (const s of Object.values(POLYGLOT)) for (const [rel, content] of Object.entries(s.files)) write(dir, rel, content);
   await g(dir, ["add", "-A"], "2026-01-01T00:00:00Z");
   await g(dir, ["commit", "-q", "-m", "polyglot fixture"], "2026-01-01T10:00:00Z");
+  return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-01-01T10:00:00Z")] };
+}
+
+/**
+ * Stack sandbox fixture (M3 W5, AC12): one small buildable project per W5 stack, each with a
+ * dependency (exercising the offline cache) and planted lint/type signals. Files live in
+ * test/fixtures/stack-sandbox (lockfiles generated in the pinned stack images).
+ */
+export async function makeStackSandboxRepo(dir: string): Promise<FixtureRepo> {
+  const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/fixtures/stack-sandbox");
+  mkdirSync(dir, { recursive: true });
+  cpSync(src, dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-01-01T00:00:00Z");
+  await g(dir, ["add", "-A"], "2026-01-01T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "stack sandbox fixture"], "2026-01-01T10:00:00Z");
   return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-01-01T10:00:00Z")] };
 }

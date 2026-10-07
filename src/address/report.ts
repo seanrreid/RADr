@@ -88,8 +88,13 @@ function coverageSection(inp: RunInputs): string | null {
   const stacks = (inp.metrics["coverage"] as { stacks?: Record<string, { status: string; line_pct: number | null; branch_pct: number | null }> } | undefined)?.stacks;
   if (stacks === undefined || Object.keys(stacks).length === 0) return null;
   const pctText = (v: number | null) => (v === null ? "—" : `${String(v)}%`);
-  return table(["Stack", "Result", "Line coverage", "Branch coverage"],
+  const t = table(["Stack", "Result", "Line coverage", "Branch coverage"],
     stableSort(Object.entries(stacks), ([k]) => k).map(([k, m]) => [esc(k), esc(m.status), pctText(m.line_pct), pctText(m.branch_pct)]));
+  const notes = [
+    ...(Object.hasOwn(stacks, "go") ? ["Go reports statement coverage (shown in the line column)."] : []),
+    ...(["rust", "java-kotlin", "php", "ruby", "csharp"].some((k) => Object.hasOwn(stacks, k)) ? ["For Rust, JVM, PHP, Ruby and .NET, radr runs the test suite (twice, for stability) but does not measure coverage."] : []),
+  ];
+  return notes.length === 0 ? t : `${t}\n\n${notes.join(" ")}`;
 }
 
 const PACK_LABEL: Readonly<Record<string, string>> = {

@@ -16,3 +16,52 @@ images:
     platforms:
       - linux/amd64
       - linux/arm64
+  go:
+    ref: docker.io/library/golang@sha256:8d48e12ec56735e9358640898b9d9b9fcca110612ed8a5567438c0a1baa24e66
+    tag: 1.27-bookworm
+    purpose: go stack (base)
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  rust:
+    ref: docker.io/library/rust@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
+    tag: 1.99-bookworm
+    purpose: rust stack (base)
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  jvm:
+    ref: docker.io/library/eclipse-temurin@sha256:3e3c176ffed168beb42c607be9bc1639b466cf00261a0fb04425562c9d0c5c2b
+    tag: 21-jdk
+    purpose: java-kotlin stack (base)
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  php:
+    ref: docker.io/library/php@sha256:836ac6c672d1372a47c8fd61b625015bd07760f493fb2eaab2087636498a2b4b
+    tag: 8.4-cli-bookworm
+    purpose: php stack (base)
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  ruby:
+    ref: docker.io/library/ruby@sha256:80259ba83f866aaa43c689e11569dc950b2e508effca0799d50608f7c4ca6172
+    tag: 3.4-bookworm
+    purpose: ruby stack (base)
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  dotnet-8:
+    ref: mcr.microsoft.com/dotnet/sdk@sha256:ec9c0a0dc5f60adc2065762050638dd5ed5facfc53716d4580a42d86027c8e80
+    tag: "8.0"
+    purpose: csharp stack, net8 and earlier
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  dotnet-10:
+    ref: mcr.microsoft.com/dotnet/sdk@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317
+    tag: "10.0"
+    purpose: csharp stack, net9/net10
+    platforms:
+      - linux/amd64
+      - linux/arm64

@@ -2,7 +2,7 @@
 // (`deps warm`) and the offline install (from the dependency cache snapshot) from one approved
 // recipe. Only the test command is free-form shell; it runs inside the sandbox.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { RefusedError } from "../core/errors.js";
 
@@ -29,9 +29,23 @@ export interface PythonRecipe {
   readonly extra_packages: readonly string[];
 }
 
+/** M3 W5 stacks. `dir` is the project root (where the manifest lives), relative to the repo. */
+export interface GoRecipe { readonly dir: string; readonly test: boolean }
+export interface RustRecipe { readonly dir: string; readonly test: boolean }
+export interface JvmRecipe { readonly dir: string; readonly build_tool: "maven" | "gradle"; readonly test: boolean }
+export interface PhpRecipe { readonly dir: string; readonly test: boolean }
+export interface RubyRecipe { readonly dir: string; readonly test: "rspec" | "rake" | null }
+export interface DotnetRecipe { readonly dir: string; readonly sdk: "8.0" | "10.0"; readonly project: string; readonly test: boolean }
+
 export interface BuildRecipe {
   readonly "typescript-javascript"?: NodeRecipe;
   readonly python?: PythonRecipe;
+  readonly go?: GoRecipe;
+  readonly rust?: RustRecipe;
+  readonly "java-kotlin"?: JvmRecipe;
+  readonly php?: PhpRecipe;
+  readonly ruby?: RubyRecipe;
+  readonly csharp?: DotnetRecipe;
 }
 
 export const RECIPE_SCHEMA = {
@@ -49,6 +63,18 @@ export const RECIPE_SCHEMA = {
         extra_packages: { type: "array", items: { type: "string", pattern: "^[A-Za-z0-9_.-]+==[A-Za-z0-9_.+-]+$" } },
       },
     },
+    go: { type: "object", additionalProperties: false, required: ["dir", "test"], properties: { dir: { type: "string" }, test: { type: "boolean" } } },
+    rust: { type: "object", additionalProperties: false, required: ["dir", "test"], properties: { dir: { type: "string" }, test: { type: "boolean" } } },
+    "java-kotlin": {
+      type: "object", additionalProperties: false, required: ["dir", "build_tool", "test"],
+      properties: { dir: { type: "string" }, build_tool: { enum: ["maven", "gradle"] }, test: { type: "boolean" } },
+    },
+    php: { type: "object", additionalProperties: false, required: ["dir", "test"], properties: { dir: { type: "string" }, test: { type: "boolean" } } },
+    ruby: { type: "object", additionalProperties: false, required: ["dir", "test"], properties: { dir: { type: "string" }, test: { enum: ["rspec", "rake", null] } } },
+    csharp: {
+      type: "object", additionalProperties: false, required: ["dir", "sdk", "project", "test"],
+      properties: { dir: { type: "string" }, sdk: { enum: ["8.0", "10.0"] }, project: { type: "string" }, test: { type: "boolean" } },
+    },
   },
 } as const;
 
@@ -64,9 +90,64 @@ function safeRel(p: string, what: string): string {
   return p;
 }
 
+const dirOf = (rel: string): string => (path.posix.dirname(rel) === "." ? "." : path.posix.dirname(rel));
+/** Shallowest manifest matching `re` (code-point order breaks ties): the project root for a stack. */
+function rootManifest(manifests: readonly string[], re: RegExp): string | undefined {
+  return [...manifests].filter((m) => re.test(path.posix.basename(m))).sort((a, b) => a.split("/").length - b.split("/").length || (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+const read = (worktree: string, rel: string): string => (existsSync(path.join(worktree, rel)) ? readFileSync(path.join(worktree, rel), "utf8") : "");
+
+/** M3 W5 recipes, from detection's manifest lists. */
+function proposeStackRecipes(worktree: string, manifests: Readonly<Record<string, readonly string[]>>, out: { -readonly [K in keyof BuildRecipe]: BuildRecipe[K] }): void {
+  const has = (dir: string, ...names: string[]): boolean => names.some((n) => existsSync(path.join(worktree, dir, n)));
+  const goMod = rootManifest(manifests["go"] ?? [], /^go\.mod$/);
+  if (goMod !== undefined) {
+    const dir = dirOf(goMod);
+    const tests = (manifests["go-tests"] ?? []).length > 0 || /_test\.go/.test(walkNames(path.join(worktree, dir)));
+    out.go = { dir, test: tests };
+  }
+  const cargo = rootManifest(manifests["rust"] ?? [], /^Cargo\.toml$/);
+  if (cargo !== undefined) out.rust = { dir: dirOf(cargo), test: true };
+  const pom = rootManifest(manifests["java-kotlin"] ?? [], /^pom\.xml$/);
+  const gradle = rootManifest(manifests["java-kotlin"] ?? [], /^(settings|build)\.gradle(\.kts)?$/);
+  if (pom !== undefined) out["java-kotlin"] = { dir: dirOf(pom), build_tool: "maven", test: has(dirOf(pom), "src/test") };
+  else if (gradle !== undefined && has(dirOf(gradle), "gradlew")) out["java-kotlin"] = { dir: dirOf(gradle), build_tool: "gradle", test: has(dirOf(gradle), "src/test") };
+  const composer = rootManifest(manifests["php"] ?? [], /^composer\.json$/);
+  if (composer !== undefined) out.php = { dir: dirOf(composer), test: /"phpunit\/phpunit"/.test(read(worktree, composer)) };
+  const gemfile = rootManifest(manifests["ruby"] ?? [], /^Gemfile$/);
+  if (gemfile !== undefined) {
+    const dir = dirOf(gemfile);
+    const gems = read(worktree, gemfile);
+    const test = has(dir, "spec") && /rspec/.test(gems) ? "rspec" : has(dir, "Rakefile") && has(dir, "test") ? "rake" : null;
+    out.ruby = { dir, test };
+  }
+  const project = rootManifest(manifests["csharp"] ?? [], /\.sln$/) ?? rootManifest(manifests["csharp"] ?? [], /\.(csproj|fsproj|vbproj)$/);
+  if (project !== undefined) {
+    const dir = dirOf(project);
+    const projText = (manifests["csharp"] ?? []).filter((m) => /proj$/.test(m)).map((m) => read(worktree, m)).join("\n");
+    const sdk = /<TargetFrameworks?>[^<]*net(9|1\d)\.\d/.test(projText) ? "10.0" : "8.0";
+    out.csharp = { dir, sdk, project: path.posix.basename(project), test: /Microsoft\.NET\.Test\.Sdk/.test(projText) };
+  }
+}
+
+/** File names under a directory (bounded walk, skipping dependency dirs): for cheap test detection. */
+function walkNames(root: string, depth = 6): string {
+  const names: string[] = [];
+  const walk = (d: string, n: number): void => {
+    if (n < 0 || !existsSync(d)) return;
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory() && !["vendor", "node_modules", ".git", "target"].includes(e.name)) walk(path.join(d, e.name), n - 1);
+      else if (e.isFile()) names.push(e.name);
+    }
+  };
+  walk(root, depth);
+  return names.join("\n");
+}
+
 /** Propose a recipe from the worktree (the consultant reviews it in engagement.yml). */
-export function proposeRecipe(worktree: string, stacks: readonly string[]): BuildRecipe {
+export function proposeRecipe(worktree: string, stacks: readonly string[], manifests: Readonly<Record<string, readonly string[]>> = {}): BuildRecipe {
   const out: { -readonly [K in keyof BuildRecipe]: BuildRecipe[K] } = {};
+  proposeStackRecipes(worktree, Object.fromEntries(Object.entries(manifests).filter(([k]) => stacks.includes(k))), out);
   if (stacks.includes("typescript-javascript") && existsSync(path.join(worktree, "package.json"))) {
     const pkg = JSON.parse(readFileSync(path.join(worktree, "package.json"), "utf8")) as { scripts?: Record<string, unknown> };
     const testScript = pkg.scripts?.["test"];

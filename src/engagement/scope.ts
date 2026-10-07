@@ -18,6 +18,8 @@ import { engagementHash, readScopeInputs, scopeFingerprint } from "../state/fing
 import { CONTAINER_LANES, LANES, OPTIONAL_LANES, SANDBOX_LANES, loadEngagement, writeEngagement, type EngagementDoc } from "./config.js";
 import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
 import { proposeRecipe } from "../sandbox/recipe.js";
+import { scopeUsesSandbox } from "../sandbox/stacks.js";
+import { stackImages } from "../sandbox/stack-images.js";
 import { listDeps, verifyDeps } from "../sandbox/deps.js";
 import { detectStacks, type Detection } from "./detect.js";
 import type { Layout } from "./home.js";
@@ -66,7 +68,7 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
   await checkoutWorktree(l.mirror, l.worktree, sha);
   const detection = detectStacks(l.worktree);
   const runtime = await detectRuntime(req.env ?? {});
-  const recipe = proposeRecipe(l.worktree, detection.stacks);
+  const recipe = proposeRecipe(l.worktree, detection.stacks, detection.manifests);
   const canSandbox = runtime !== undefined && Object.keys(recipe).length > 0;
   const created = log.read().find((e) => e.type === "engagement-created");
   if (created === undefined) throw new RefusedError(`${l.events}: missing engagement-created event`);
@@ -107,12 +109,12 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
 async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog, runtime: Runtime | undefined): Promise<string[]> {
   const l = req.layout;
   const warnings: string[] = [];
-  const usesSandbox = doc.lanes.some((x) => SANDBOX_LANES.includes(x)) || (doc.lint_modes ?? []).includes("project");
+  const usesSandbox = scopeUsesSandbox(doc);
   if (usesSandbox && runtime === undefined) warnings.push("sandboxed lanes are enabled but no container runtime is reachable (start Podman/Docker, then `radr scope` again)");
   try {
     const lock = doc.network.enforcement === "container"
-      ? await containerLock(req.home, runtime, usesSandbox ? sandboxLockEntry(runtime) : null)
-      : buildLock(await doctor(req.home), usesSandbox ? sandboxLockEntry(runtime) : null);
+      ? await containerLock(req.home, runtime, usesSandbox ? sandboxLockEntry(runtime, stackImages(req.home)) : null)
+      : buildLock(await doctor(req.home), usesSandbox ? sandboxLockEntry(runtime, stackImages(req.home)) : null);
     writeLock(l.toolchainLock, lock);
     log.append("toolchain-locked", req.actor, { lock_hash: hashBytes(readFileSync(l.toolchainLock)), mode: lock.mode });
   } catch (e) {

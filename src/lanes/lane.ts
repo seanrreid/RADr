@@ -43,7 +43,14 @@ export interface Toolbox {
   /** Runs a tool: on the host, or in the toolchain image with --network=none (container mode). */
   readonly exec: Exec;
   /** Build sandbox (M2): runtime + offline dependency cache. null = no runtime detected. */
-  readonly sandbox: { readonly runtime: Runtime; readonly depsCache: string | null; /** HOST node-tools dir (mounted into sandboxes). */ readonly nodeTools: string } | null;
+  readonly sandbox: {
+    readonly runtime: Runtime;
+    readonly depsCache: string | null;
+    /** HOST node-tools dir (mounted into sandboxes). */
+    readonly nodeTools: string;
+    /** Sandbox image per W5 stack (locally built stack images, .NET SDK by major). */
+    readonly images: Readonly<Record<string, string>>;
+  } | null;
 }
 
 export interface LaneContext {

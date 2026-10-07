@@ -32,7 +32,9 @@ import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtim
 import { verifyDeps } from "../sandbox/deps.js";
 import { assertSafeImage, containerExec, hostExec, type ContainerMount } from "../toolchain/container.js";
 import { IMAGE_CONFIGS, IMAGE_NODE, IMAGE_NODE_TOOLS, IMAGE_PY, imageBins, imageId, pyToolVersions } from "../toolchain/image.js";
+import { scopeUsesSandbox } from "../sandbox/stacks.js";
 import { SANDBOX_LANES } from "../engagement/config.js";
+import { stackImages } from "../sandbox/stack-images.js";
 
 export interface LaneSummary {
   readonly lane: string;
@@ -115,7 +117,7 @@ function hostToolbox(home: string, l: Layout, checks: readonly ToolCheck[], runt
   return {
     bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"), rulesDir: assetPath("rules"),
     python: bins["lizard"] ?? "/nonexistent/python3", pythonPath: path.join(pyToolsDir(home), "site"),
-    exec: hostExec(), sandbox: runtime === undefined ? null : { runtime, depsCache, nodeTools: nodeToolsDir(home) },
+    exec: hostExec(), sandbox: runtime === undefined ? null : { runtime, depsCache, nodeTools: nodeToolsDir(home), images: stackImages(home) },
   };
 }
 
@@ -139,7 +141,7 @@ function containerToolbox(home: string, l: Layout, lock: ToolchainLock, runtime:
     bins: imageBins(platform), versions, nodeTools: IMAGE_NODE_TOOLS, node: IMAGE_NODE, osvDb, ruffConfig: `${IMAGE_CONFIGS}/ruff.toml`, rulesDir: assetPath("rules"),
     python: `${IMAGE_PY}/bin/python`, pythonPath: null,
     exec: containerExec(runtime, assertSafeImage(image.tag), mounts),
-    sandbox: { runtime, depsCache, nodeTools: nodeToolsDir(home) },
+    sandbox: { runtime, depsCache, nodeTools: nodeToolsDir(home), images: stackImages(home) },
   };
 }
 
@@ -165,19 +167,19 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const containerMode = doc.network.enforcement === "container";
   // Probe for a container runtime only when this scope needs one (probing can take seconds).
   const lockedSandbox = lock.sandbox;
-  const usesSandbox = (lockedSandbox !== undefined && lockedSandbox !== null) || doc.lanes.some((x) => SANDBOX_LANES.includes(x));
+  const usesSandbox = (lockedSandbox !== undefined && lockedSandbox !== null) || scopeUsesSandbox(doc);
   const runtime = usesSandbox || containerMode ? await detectRuntime(env) : undefined;
   let problems: ToolProblems;
   let tools: Toolbox;
   let staticProblem: { outcome: "tool-missing" | "version-drift"; detail: string } | undefined;
   if (containerMode) {
     staticProblem = await imageProblem(lock, runtime);
-    const sandboxLines = diffLocks(lock, { ...lock, sandbox: usesSandbox ? sandboxLockEntry(runtime) : null }).filter((x) => x.startsWith("sandbox"));
+    const sandboxLines = diffLocks(lock, { ...lock, sandbox: usesSandbox ? sandboxLockEntry(runtime, stackImages(home)) : null }).filter((x) => x.startsWith("sandbox"));
     problems = { byTool: new Map(sandboxLines.length > 0 ? [["sandbox", runtime === undefined ? "tool-missing" : "version-drift"] as const] : []), lines: sandboxLines };
     tools = staticProblem === undefined && runtime !== undefined ? containerToolbox(home, l, lock, runtime) : hostToolbox(home, l, [], runtime);
   } else {
     const checks = await doctor(home);
-    problems = toolProblems(l, checks, usesSandbox ? sandboxLockEntry(runtime) : null);
+    problems = toolProblems(l, checks, usesSandbox ? sandboxLockEntry(runtime, stackImages(home)) : null);
     tools = hostToolbox(home, l, checks, runtime);
   }
 

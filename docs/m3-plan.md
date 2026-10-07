@@ -172,3 +172,52 @@
   - **Repository hygiene:** Scorecard's offline scores.
 - ScanCode skips lockfiles. They name dependency licenses as text, which the SBOM already
   reports; without the skip, the same dependency fact would appear twice.
+
+### W5 — Stacks, sandboxed
+
+| Stack | Image | Offline install (warm → run) | types | lint | tests |
+|---|---|---|---|---|---|
+| Go | golang 1.27 + golangci-lint 2.14.0 | `go mod download` → modcache copy, `GOPROXY=off` | `go vet` | golangci-lint (`--no-config`) | `go test -vet=off -coverprofile` → statement % |
+| Rust | rust 1.99 + clippy (rustup) | `cargo fetch` → `CARGO_HOME` copy, `--offline` | `cargo check` errors | clippy lints | `cargo test` (pass/fail, stability) |
+| JVM | temurin 21 + Maven 3.10.0 + PMD 7.28.0 | Maven `go-offline` + test (or Gradle wrapper `testClasses`) → `-o` / `--offline` | javac/kotlinc errors | PMD quickstart | `mvn test` / `gradlew test` |
+| PHP | php 8.4 + Composer 2.10.3 + PHPStan 2.3.0 | `composer install` → cache copy, network disabled | PHPStan level 5 | (PHPStan) | PHPUnit when declared |
+| Ruby | ruby 3.4 + RuboCop 1.91.0 (checksummed lock) | `bundle cache` → `bundle install --local` | — | RuboCop Lint + Security | rspec / `rake test` |
+| .NET | SDK 8.0 or 10.0 (by target framework) | `dotnet restore` → restore from the warmed packages folder | compiler errors | CA analyzers (security: all) | `dotnet test` when declared |
+
+- **Stack images.**
+  - Built locally from pinned base digests (`toolchain/sandbox-images.yml`, which now
+    includes Microsoft's registry) and named `localhost/radr-sandbox-<stack>:<context hash>`.
+  - Downloaded tools (`toolchain/sandbox-tools.yml`, from `scripts/pin-sandbox-tools.ts`)
+    are sha256-checked in a separate fetch stage.
+  - clippy comes from rustup, which verifies it against the channel manifest.
+  - RuboCop comes from bundler with `BUNDLE_FROZEN` and a lockfile with `CHECKSUMS`
+    (`scripts/pin-rubocop.sh`).
+  - Maven is fetched from Maven Central and verified against Apache's published sha512.
+    archive.apache.org was too slow to use during builds.
+  - `radr deps warm` builds or pulls the images a recipe needs; it is the online step.
+    `radr tools build-image --stack <s>` does the same on its own. `tools install` now pulls
+    only the node and python images.
+  - The stack image tags are recorded in `toolchain.lock`, so a pin change shows up as
+    sandbox drift.
+- **Lanes.**
+  - The types and coverage lanes run each stack's driver (`src/sandbox/stacks.ts`).
+  - The lint lane runs the stack linters in the sandbox, except in the triage tier.
+  - Without a container runtime, the lint lane records a note instead of failing.
+  - Static linters (PMD, RuboCop) skip the dependency install.
+  - Coverage has a percentage for Go only (statement coverage). The other stacks run their
+    tests twice for pass/fail and stability, and the report says so.
+- **Every linter uses radr's own configuration:** golangci-lint `--no-config`, an explicit
+  RuboCop config, a radr PHPStan config, and the PMD quickstart ruleset.
+- **Found while building:**
+  - Maven's resolver spins forever on file locks over virtiofs-mounted caches. Maven and
+    Gradle therefore warm into container-local storage and copy the result into the cache.
+  - PHPStan resolves `excludePaths` relative to its config file, so the exclude path is
+    absolute.
+  - `go test` runs vet checks by default; tests use `-vet=off` because vet is the types
+    lane's job.
+- **Tests:**
+  - goldens from real outputs of every W5 tool (`test/golden/stacks/`)
+  - driver and recipe unit tests
+  - the AC12 e2e (`test/fixtures/stack-sandbox`): warm once, then lint, types and tests run
+    offline for all six stacks, every planted signal is found, nothing fails to build, and
+    tests are stable

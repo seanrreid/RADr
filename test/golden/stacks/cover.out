@@ -1,0 +1,4 @@
+mode: set
+example.com/svc/main.go:10.20,10.45 1 0
+example.com/svc/main.go:12.26,12.40 1 1
+example.com/svc/main.go:15.2,17.1 2 0

@@ -13,13 +13,15 @@ import { ParseError, eslintAdapter, type SnippetReader } from "../normalize/adap
 import { mypyAdapter, parseLcov, pct, sandboxRoot, tscAdapter, type Coverage } from "../normalize/sandbox-adapters.js";
 import { CACHE_MOUNT, NODE_TOOLS_MOUNT, nodeInstall, pythonInstall, q, type NodeRecipe, type PythonRecipe } from "../sandbox/recipe.js";
 import { imageRef, runSandbox, type Mount, type SandboxStep } from "../sandbox/runtime.js";
+import { drivers, type AnalysisStep, type Driver, type InstallMode } from "../sandbox/stacks.js";
+import { goCoverAdapter, goModulePath } from "../normalize/stack-adapters.js";
 import { rawDir, type Lane, type LaneContext, type LaneOutcome, type LaneResult, type ToolRun } from "./lane.js";
 
 const SANDBOX_TIMEOUT_MS = 30 * 60 * 1000;
 const COVERAGE_RUNS = 2;
 const VENV = ". /tmp/venv/bin/activate";
 
-type Stack = "typescript-javascript" | "python";
+type Stack = string;
 
 interface SandboxOutcome {
   readonly outcome: LaneOutcome;
@@ -42,8 +44,16 @@ function snippetReader(root: string): SnippetReader {
   };
 }
 
+interface SandboxOpts {
+  /** Image override (W5 stacks); default: the stack's pinned base image. */
+  readonly image?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  /** Steps that need no dependencies (static linters) can run without a dependency snapshot. */
+  readonly needsDeps?: boolean;
+}
+
 /** Run install + steps for one stack in a fresh container; returns per-step exit codes. */
-async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: string, install: string, steps: readonly SandboxStep[]): Promise<SandboxOutcome> {
+async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: string, install: string, steps: readonly SandboxStep[], opts: SandboxOpts = {}): Promise<SandboxOutcome> {
   const out = path.join(rawDir(ctx, lane), stack);
   mkdirSync(out, { recursive: true });
   const sb = ctx.tools.sandbox;
@@ -51,7 +61,8 @@ async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: stri
   const empty: ToolRun = { tool: `sandbox:${stack}`, exit_code: null, stdout_hash: hash(""), stderr_hash: hash(""), raw_ref: ref };
   if (sb === null) return { outcome: "tool-missing", out, steps: new Map(), run: empty, detail: "no container runtime (install Podman or Docker, then re-scope)" };
   const online = ctx.doc.network.mode === "network";
-  if (!online && sb.depsCache === null) return { outcome: "tool-missing", out, steps: new Map(), run: empty, detail: "no dependency snapshot pinned (run `radr deps warm`, then re-scope)" };
+  if (!online && sb.depsCache === null && opts.needsDeps !== false) return { outcome: "tool-missing", out, steps: new Map(), run: empty, detail: "no dependency snapshot pinned (run `radr deps warm`, then re-scope)" };
+  const image = opts.image ?? sb.images[stack] ?? imageRef(stack === "python" ? "python" : "node");
 
   const mounts: Mount[] = [
     { host: ctx.layout.worktree, container: "/src", readOnly: true },
@@ -60,10 +71,12 @@ async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: stri
   if (stack === "typescript-javascript") mounts.push({ host: sb.nodeTools, container: NODE_TOOLS_MOUNT, readOnly: true });
   if (!online && sb.depsCache !== null) mounts.push({ host: sb.depsCache, container: CACHE_MOUNT, readOnly: true });
 
+  const short: Readonly<Record<string, string>> = { "typescript-javascript": "js", python: "py", "java-kotlin": "jvm", csharp: "net" };
   const r = await runSandbox({
-    runtime: sb.runtime, image: imageRef(stack === "python" ? "python" : "node"),
-    name: `radr-${ctx.layout.id}-${ctx.runId}-${lane}-${stack === "python" ? "py" : "js"}-${ctx.attempt}`.toLowerCase().slice(0, 120),
+    runtime: sb.runtime, image,
+    name: `radr-${ctx.layout.id}-${ctx.runId}-${lane}-${short[stack] ?? stack}-${String(ctx.attempt)}`.toLowerCase().slice(0, 120),
     network: online, mounts, workdir: dir, steps: [{ name: "install", command: install, required: true }, ...steps], timeoutMs: SANDBOX_TIMEOUT_MS,
+    ...(opts.env !== undefined ? { env: opts.env } : {}),
   }, out);
   const run: ToolRun = { tool: `sandbox:${stack}`, exit_code: r.exec.exitCode, stdout_hash: r.exec.stdoutHash, stderr_hash: r.exec.stderrHash, raw_ref: ref };
   const stepCodes = new Map(r.steps.map((s) => [s.name, s.exitCode]));
@@ -76,8 +89,8 @@ async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: stri
 }
 
 /** "Doesn't build from a clean checkout": one finding per stack, shared by every sandboxed lane. */
-function buildFailed(ctx: LaneContext, stack: Stack, dir: string, out: string, rawRef: string): FindingDraft {
-  const manifest = stack === "python" ? (ctx.doc.build?.python?.requirements[0] ?? "pyproject.toml") : "package.json";
+function buildFailed(ctx: LaneContext, stack: Stack, dir: string, out: string, rawRef: string, manifestName?: string): FindingDraft {
+  const manifest = manifestName ?? (stack === "python" ? (ctx.doc.build?.python?.requirements[0] ?? "pyproject.toml") : "package.json");
   const file = dir === "." ? manifest : `${dir}/${manifest}`;
   const tail = readOut(out, "install.log").trim().split("\n").slice(-1)[0] ?? "";
   return {
@@ -142,6 +155,7 @@ export const types: Lane = {
         parts.push({ outcome: "parse-error" as const, run: s.run, findings: [], detail: e.message });
       }
     }
+    parts.push(...(await stackTypes(ctx)));
     return combine(parts);
   },
 };
@@ -217,6 +231,7 @@ export const coverage: Lane = {
         parts.push({ outcome: "parse-error" as const, run: s.run, findings: [], detail: e.message });
       }
     }
+    parts.push(...(await stackCoverage(ctx, metrics)));
     return combine(parts, { stacks: metrics });
   },
 };
@@ -245,4 +260,113 @@ export async function eslintProject(ctx: LaneContext): Promise<{ outcome: LaneOu
     if (!(e instanceof ParseError)) throw e;
     return { outcome: "parse-error", run: s.run, findings: [], detail: e.message };
   }
+}
+
+// --- M3 W5 stacks (drivers: src/sandbox/stacks.ts) ------------------------------------------------
+
+type Part = { outcome: LaneOutcome; run?: ToolRun; findings: FindingDraft[]; detail?: string };
+
+function driverMode(ctx: LaneContext): InstallMode {
+  return ctx.doc.network.mode === "network" ? "online" : "offline";
+}
+
+/** One analysis step for one W5 stack: sandbox → install (if needed) → step → parse. */
+async function analyze(ctx: LaneContext, lane: string, d: Driver, dir: string, step: AnalysisStep, dotnetSdk: string): Promise<Part> {
+  const mode = driverMode(ctx);
+  const image = ctx.tools.sandbox?.images[d.stack === "csharp" ? `csharp-${dotnetSdk}` : d.stack];
+  const s = await inSandbox(ctx, lane, d.stack, dir, step.needsInstall ? d.install(mode) : "true",
+    [{ name: step.name, command: step.command, required: false }], { env: d.env(mode), needsDeps: step.needsInstall, ...(image !== undefined ? { image } : {}) });
+  if (s.outcome !== "success") return s.detail === undefined ? { outcome: s.outcome, run: s.run, findings: [] } : { outcome: s.outcome, run: s.run, findings: [], detail: s.detail };
+  const ref = s.run.raw_ref ?? "";
+  if (s.steps.get("install") !== 0) return { outcome: "success", run: s.run, findings: [buildFailed(ctx, d.stack, dir, s.out, ref, d.manifest)] };
+  const code = s.steps.get(step.name);
+  const file = step.output ?? `${step.name}.log`;
+  const text = readOut(s.out, file);
+  if (step.output !== null && text.trim() === "") {
+    return { outcome: "tool-error", run: s.run, findings: [], detail: `${step.tool} (${d.stack}) wrote no output (exit ${String(code)}): ${readOut(s.out, `${step.name}.log`).trim().split("\n").at(-1) ?? ""}` };
+  }
+  try {
+    return { outcome: "success", run: s.run, findings: step.parse(text, { dir, rawRef: `${ref}/${file}`, toolVersion: step.tool, snippet: snippetReader(ctx.layout.worktree) }) };
+  } catch (e) {
+    if (!(e instanceof ParseError)) throw e;
+    return { outcome: "parse-error", run: s.run, findings: [], detail: e.message };
+  }
+}
+
+/** Type-check steps of the W5 stacks (types lane). */
+export async function stackTypes(ctx: LaneContext): Promise<Part[]> {
+  const parts: Part[] = [];
+  for (const { driver, recipe, dotnetSdk } of drivers(ctx.doc.build, ctx.doc.stacks, ctx.doc.network.mode === "network")) {
+    const step = driver.typecheck();
+    if (step !== null) parts.push(await analyze(ctx, "types", driver, recipe.dir, step, dotnetSdk));
+  }
+  return parts;
+}
+
+/** Sandboxed linters of the W5 stacks (lint lane, baseline mode). Skipped, with a note, without a runtime. */
+export async function stackLint(ctx: LaneContext): Promise<Part[]> {
+  const ds = drivers(ctx.doc.build, ctx.doc.stacks, ctx.doc.network.mode === "network").filter((x) => x.driver.lint() !== null);
+  if (ds.length === 0) return [];
+  if (ctx.tools.sandbox === null) return [{ outcome: "success", findings: [], detail: `${ds.map((x) => x.driver.stack).join(", ")} linters need the build sandbox (no container runtime)` }];
+  const parts: Part[] = [];
+  for (const { driver, recipe, dotnetSdk } of ds) {
+    const step = driver.lint();
+    if (step !== null) parts.push(await analyze(ctx, "lint", driver, recipe.dir, step, dotnetSdk));
+  }
+  return parts;
+}
+
+/** Tests (and, for Go, statement coverage) of the W5 stacks (coverage lane). */
+export async function stackCoverage(ctx: LaneContext, metrics: Record<string, StackCoverage>): Promise<Part[]> {
+  const mode = driverMode(ctx);
+  const parts: Part[] = [];
+  for (const { driver: d, recipe, dotnetSdk } of drivers(ctx.doc.build, ctx.doc.stacks, ctx.doc.network.mode === "network")) {
+    if (d.test(1) === null) {
+      metrics[d.stack] = { status: "no-tests", runs: [], line_pct: null, branch_pct: null, files: {} };
+      continue;
+    }
+    const steps: SandboxStep[] = [];
+    for (let n = 1; n <= COVERAGE_RUNS; n++) steps.push({ name: `test${String(n)}`, command: d.test(n) ?? "true", required: false });
+    const image = ctx.tools.sandbox?.images[d.stack === "csharp" ? `csharp-${dotnetSdk}` : d.stack];
+    const s = await inSandbox(ctx, "coverage", d.stack, recipe.dir, d.install(mode), steps, { env: d.env(mode), ...(image !== undefined ? { image } : {}) });
+    if (s.outcome !== "success") { parts.push(s.detail === undefined ? { outcome: s.outcome, run: s.run, findings: [] } : { outcome: s.outcome, run: s.run, findings: [], detail: s.detail }); continue; }
+    const ref = s.run.raw_ref ?? "";
+    if (s.steps.get("install") !== 0) {
+      metrics[d.stack] = { status: "build-failed", runs: [], line_pct: null, branch_pct: null, files: {} };
+      parts.push({ outcome: "success", run: s.run, findings: [buildFailed(ctx, d.stack, recipe.dir, s.out, ref, d.manifest)] });
+      continue;
+    }
+    try {
+      const covs: (Coverage | null)[] = [];
+      for (let n = 1; n <= COVERAGE_RUNS; n++) {
+        if (d.stack !== "go") { covs.push(null); continue; }
+        const profile = readOut(s.out, `cov${String(n)}/cover.out`);
+        const goMod = readOut(path.join(ctx.layout.worktree, recipe.dir), "go.mod");
+        covs.push(profile.trim() === "" ? null : goCoverAdapter(profile, goModulePath(goMod), recipe.dir));
+      }
+      const runHashes = covs.map((c, i) => ({ exit: s.steps.get(`test${String(i + 1)}`) ?? null, coverage_hash: c === null ? null : hash(c) }));
+      const [firstRun] = runHashes;
+      const stable = firstRun !== undefined && runHashes.every((r) => r.exit === firstRun.exit && r.coverage_hash === firstRun.coverage_hash);
+      const first = covs[0] ?? null;
+      const file = recipe.dir === "." ? d.manifest : `${recipe.dir}/${d.manifest}`;
+      const finding = (rule: string, sev: string, message: string): FindingDraft => ({
+        lane: "coverage", tool: "radr-coverage", tool_version: "1", rule_id: rule, category: "test", file, line: 0, end_line: 0, message,
+        tool_severity: sev, snippet: null, engine_fingerprint: `coverage:${d.stack}:${rule}`, cve: null, aliases: [], cvss: null, raw_ref: `${ref}/test1.log`, tags: [`stack:${d.stack}`],
+      });
+      const findings: FindingDraft[] = [];
+      if (!stable) findings.push(finding("unstable-results", "flaky-test", `${d.stack} test results${d.stack === "go" ? " or coverage" : ""} differ between ${String(COVERAGE_RUNS)} identical runs (flaky tests or order-dependent state)`));
+      if (runHashes.every((r) => r.exit !== 0)) findings.push(finding("tests-failed", "tests-failed", `${d.stack} test suite fails from a clean checkout (exit ${String(runHashes[0]?.exit)})`));
+      const fileRows: Record<string, { lines_found: number; lines_hit: number }> = {};
+      for (const [f, c] of Object.entries(first?.files ?? {})) fileRows[f] = { lines_found: c.lines_found, lines_hit: c.lines_hit };
+      metrics[d.stack] = {
+        status: stable ? "stable" : "unstable", runs: runHashes,
+        line_pct: first === null ? null : pct(first.totals.lines_hit, first.totals.lines_found), branch_pct: null, files: fileRows,
+      };
+      parts.push({ outcome: "success", run: s.run, findings });
+    } catch (e) {
+      if (!(e instanceof ParseError)) throw e;
+      parts.push({ outcome: "parse-error", run: s.run, findings: [], detail: e.message });
+    }
+  }
+  return parts;
 }

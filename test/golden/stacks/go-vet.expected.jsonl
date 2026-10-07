@@ -1,0 +1,1 @@
+{"aliases":[],"category":"quality","cve":null,"cvss":null,"end_line":15,"engine_fingerprint":null,"file":"go-svc/main.go","lane":"types","line":15,"message":"fmt.Printf format %d has arg ID() of wrong type string","raw_ref":"raw/go-vet.log#L1","rule_id":"go-vet","snippet":null,"tags":[],"tool":"go-vet","tool_severity":"error","tool_version":"pinned"}

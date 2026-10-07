@@ -43,6 +43,17 @@ base:
   scancode: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }  # source licenses, by §4 class
   syft: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }      # dependency licenses (SBOM)
   scorecard: { failing: medium, weak: low }             # hygiene: Scorecard check score 0–2 / 3–4
+  # M3 W5: sandboxed per-stack tools.
+  go-vet: { error: low }                                # types: go vet (compile errors + vet checks)
+  golangci-lint: { issue: low }                         # lint: no severities in the default linters
+  rustc: { error: low }                                 # types: cargo check errors
+  clippy: { warning: low, error: medium }               # lint: deny-level clippy lints report as error
+  javac: { error: low }                                 # types: javac / kotlinc compile errors
+  pmd: { "1": medium, "2": low, "3": low, "4": info, "5": info }   # lint: PMD priority 1 (high) … 5 (low)
+  phpstan: { error: low }                               # types: PHPStan level 5
+  rubocop: { fatal: medium, error: low, warning: low, convention: info, refactor: info, info: info }
+  dotnet-build: { error: low }                          # types: C#/F#/VB compiler errors
+  dotnet-analyzers: { warning: low, error: medium }     # lint: .NET CA analyzers (security mode: all)
 
 # --- 2. Rule overrides: exact (tool, rule_id) → severity, applied after base ---------------------
 # Rule IDs must exist in the pinned tool version; radr checks gitleaks IDs against its rule list.
@@ -54,6 +65,17 @@ rule_overrides:
     github-pat: critical
     stripe-access-token: critical
     generic-api-key: medium          # high false-positive rate; still always in the review set
+  rubocop:
+    Security/Eval: medium
+    Security/Open: medium
+    Security/MarshalLoad: medium
+    Security/YAMLLoad: medium
+  dotnet-analyzers:
+    CA2100: medium                   # SQL built from strings
+    CA3001: medium                   # SQL injection (taint)
+    CA3006: medium                   # process command injection (taint)
+    CA3075: medium                   # insecure DTD processing (XXE)
+    CA5351: medium                   # broken cryptographic algorithm
 
 # --- 3. Vulnerabilities: CVSS bands, then promotion (never demotion) -----------------------------
 cvss_bands_x10:

@@ -11,7 +11,7 @@ import { readFileSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { makeFixtureRepo, makeHealthFixtureRepo, makeSandboxFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { makeFixtureRepo, makeHealthFixtureRepo, makeSandboxFixtureRepo, makeStackSandboxRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 import { zipStored } from "../helpers/zip.js";
 import { syncOsv } from "../../src/toolchain/db.js";
@@ -179,5 +179,48 @@ describe("M3 container toolchain end-to-end (real runtime)", { skip: ENABLED ? f
     assert.match(report, /\| network-copyleft \| 0 \| 1 \|/);
     assert.match(report, /# Repository hygiene/);
     assert.match(report, /Toolchain \| container image sha256:/);
+  });
+});
+
+describe("M3 W5 stack sandboxes end-to-end (real runtime)", { skip: ENABLED ? false : "set RADR_E2E_TOOLS and RADR_E2E_SANDBOX=1" }, () => {
+  it("Go, Rust, JVM, PHP, Ruby and .NET: warm once, then lint, types and tests run offline (AC12)", async () => {
+    const root = tmpDir("radr-e2e-stacks-");
+    const repo = await makeStackSandboxRepo(path.join(root, "fork"));
+    const home = path.join(root, "home");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(home);
+    symlinkSync(path.join(TOOLS_HOME ?? "", "tools"), path.join(home, "tools"));
+    const radr = async (...args: string[]) => {
+      const env: Record<string, string> = { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" };
+      for (const k of PASS) { const v = process.env[k]; if (v !== undefined) env[k] = v; }
+      const r = await run({ command: process.execPath, args: [bin, ...args], cwd: root, env, timeoutMs: 60 * 60 * 1000, okExitCodes: [0, 1, 2, 3] });
+      assert.equal(r.exitCode, 0, `radr ${args.join(" ")}:\n${r.stdout.toString()}\n${r.stderr.toString()}`);
+      return r.stdout.toString();
+    };
+    await radr("init", "acme", "stk");
+    const scoped = await radr("scope", "-e", "acme-stk", "--source", repo.dir);
+    assert.match(scoped, /stacks: csharp, go, java-kotlin, php, ruby, rust/);
+    const yml = path.join(home, "engagements", "acme-stk", "engagement.yml");
+    // The sandboxed lanes only: sca/sast/etc. are covered by the static e2e suites.
+    writeFileSync(yml, readFileSync(yml, "utf8").replace(/lanes:\n( {2}- .*\n)+/, "lanes:\n  - lint\n  - types\n  - coverage\n"));
+    await radr("deps", "warm", "-e", "acme-stk"); // builds the stack images, then warms every cache online
+    await radr("scope", "-e", "acme-stk");
+    await radr("approve", "scope", "-e", "acme-stk");
+    assert.match(await radr("review", "-e", "acme-stk"), /run R-0001: complete/);
+    const findings = (await radr("findings", "-e", "acme-stk", "--json")).trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    const has = (tool: string, rule: string) => { assert.ok(findings.some((f) => f["tool"] === tool && f["rule_id"] === rule), `expected ${tool}/${rule}`); };
+    has("go-vet", "go-vet");
+    has("golangci-lint", "errcheck");
+    has("clippy", "clippy::ptr_arg");
+    has("pmd", "EmptyCatchBlock");
+    has("phpstan", "return.type");
+    has("rubocop", "Security/Eval");
+    has("dotnet-analyzers", "CA5394");
+    assert.ok(!findings.some((f) => f["tool"] === "radr-build"), "every stack installs offline from the warmed cache");
+    assert.ok(!findings.some((f) => f["rule_id"] === "tests-failed" || f["rule_id"] === "unstable-results"), "tests pass and are stable");
+    const cov = JSON.parse(readFileSync(path.join(home, "engagements", "acme-stk", "metrics", "R-0001", "coverage.json"), "utf8")) as { stacks: Record<string, { status: string; line_pct: number | null }> };
+    assert.equal(cov.stacks["go"]?.status, "stable");
+    assert.equal(typeof cov.stacks["go"].line_pct, "number");
+    for (const s of ["rust", "java-kotlin", "ruby"]) assert.equal(cov.stacks[s]?.status, "stable", s);
   });
 });
