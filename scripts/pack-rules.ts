@@ -83,7 +83,14 @@ interface TestReport {
  * `explain`, when given, receives why a rule is invalid (exec outcome, exit code, stderr tail).
  */
 export async function testRule(opengrep: string, rule: string, fixtures: readonly string[], explain?: (why: string) => void): Promise<"pass" | "invalid" | "failing" | "untested"> {
-  const r = await run({ command: opengrep, args: ["test", "--json", "--config", rule, ...fixtures], cwd: path.dirname(rule), env: { HOME: tmpdir() }, timeoutMs: 120_000, okExitCodes: [0, 1, 2, 7] });
+  // A HOME per run: concurrent opengrep processes sharing one HOME (its cache and settings)
+  // crash with SIGBUS on Linux.
+  const home = mkdtempSync(path.join(tmpdir(), "radr-opengrep-"));
+  const r = await run({
+    command: opengrep, args: ["test", "--json", "--config", rule, ...fixtures], cwd: path.dirname(rule),
+    env: { HOME: home, XDG_CACHE_HOME: path.join(home, "cache"), LC_ALL: "C.UTF-8", LANG: "C.UTF-8" },
+    timeoutMs: 120_000, okExitCodes: [0, 1, 2, 7],
+  }).finally(() => { rmSync(home, { recursive: true, force: true }); });
   const why = (what: string): "invalid" => {
     explain?.(`${what}; outcome=${r.outcome} exit=${String(r.exitCode)} signal=${String(r.signal)}; stderr: ${r.stderr.toString().trim().slice(-600)}`);
     return "invalid";
