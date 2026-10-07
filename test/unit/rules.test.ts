@@ -47,9 +47,11 @@ describe("rule pack integrity (AC5)", () => {
 describe("support bar (AC6)", () => {
   it("reports supported/partial per stack against rules/targets.yml", () => {
     const cov = Object.fromEntries(ruleCoverage().map((c) => [c.stack, c]));
-    for (const s of ["typescript-javascript", "python", "go", "java-kotlin", "csharp"]) assert.equal(cov[s]?.supported, true, s);
-    for (const s of ["php", "ruby", "rust"]) assert.equal(cov[s]?.supported, false, s);
-    assert.ok((cov["ruby"]?.missing ?? []).includes(89));
+    for (const s of ["typescript-javascript", "python", "go", "java-kotlin", "csharp", "php", "ruby", "rust"]) assert.equal(cov[s]?.supported, true, s);
+    // PHP, Ruby and Rust rest on radr's authored rules: without them the gaps show, by CWE.
+    const vendoredOnly = Object.fromEntries(ruleCoverage(["pack", "lgpl"]).map((c) => [c.stack, c]));
+    for (const s of ["php", "ruby", "rust"]) assert.equal(vendoredOnly[s]?.supported, false, s);
+    assert.ok((vendoredOnly["ruby"]?.missing ?? []).includes(89));
   });
 
   it("the LGPL sub-pack is what makes TS/JS supported (dropping it is visible)", () => {
@@ -59,7 +61,7 @@ describe("support bar (AC6)", () => {
 
   it("indexes rule metadata and hashes every pack for the fingerprint", () => {
     const ids = packRules(["authored"]).map((r) => r.id);
-    assert.ok(ids.includes("radr.go.ssrf") && ids.includes("radr.python.ssti-template-from-variable"));
+    assert.ok(ids.includes("radr.go.ssrf") && ids.includes("radr.python.ssti-template-from-variable") && ids.includes("radr.rust.sqli") && ids.includes("radr.php.sqli") && ids.includes("radr.ruby.sqli"));
     assert.deepEqual(Object.keys(rulePackHashes()).sort(), ["rules_authored", "rules_lgpl", "rules_pack"]);
   });
 });

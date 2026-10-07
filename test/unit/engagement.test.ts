@@ -111,16 +111,30 @@ describe("stack detection (T2.3)", () => {
     const root = tmpDir();
     for (const [rel, body] of [
       ["web/package.json", "{}"], ["web/src/a.ts", ""], ["api/pyproject.toml", ""], ["api/requirements-dev.txt", ""],
-      ["node_modules/x/package.json", "{}"], [".venv/lib/setup.py", ""], ["svc/go.mod", ""],
+      ["node_modules/x/package.json", "{}"], [".venv/lib/setup.py", ""], ["svc/go.mod", ""], ["ios/Package.swift", ""],
     ] as const) {
       mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
       writeFileSync(path.join(root, rel), body);
     }
     const d = detectStacks(root);
-    assert.deepEqual(d.stacks, ["python", "typescript-javascript"]);
+    assert.deepEqual(d.stacks, ["go", "python", "typescript-javascript"]);
     assert.deepEqual(d.manifests.python, ["api/pyproject.toml", "api/requirements-dev.txt"]);
     assert.deepEqual(d.manifests["typescript-javascript"], ["web/package.json"]);
-    assert.deepEqual(d.unsupported, ["go"]);
+    assert.deepEqual(d.unsupported, ["swift"]);
+  });
+
+  it("detects the M3 stacks from their manifests, skipping build output (AC11)", () => {
+    const root = tmpDir();
+    for (const rel of ["rs/Cargo.lock", "rs/target/debug/build/x/Cargo.toml", "jvm/build.gradle.kts", "jvm/gradle.lockfile", "web/composer.lock",
+      "rb/Gemfile.lock", "net/App.csproj", "net/packages.lock.json", "net/obj/project.assets.json", "go/go.sum"]) {
+      mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      writeFileSync(path.join(root, rel), "");
+    }
+    const d = detectStacks(root);
+    assert.deepEqual(d.stacks, ["csharp", "go", "java-kotlin", "php", "ruby", "rust"]);
+    assert.deepEqual(d.manifests.rust, ["rs/Cargo.lock"]); // target/ is build output
+    assert.deepEqual(d.manifests.csharp, ["net/App.csproj", "net/packages.lock.json"]);
+    assert.deepEqual(d.manifests["java-kotlin"], ["jvm/build.gradle.kts", "jvm/gradle.lockfile"]);
   });
 
   it("detects a stack from source files alone", () => {

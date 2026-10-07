@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { hashBytes } from "../core/determinism.js";
-import { buildSnapshotsLock, listSnapshots, verifySnapshot, writeSnapshotsLock } from "../toolchain/db.js";
+import { STACK_ECOSYSTEM, buildSnapshotsLock, listSnapshots, verifySnapshot, writeSnapshotsLock } from "../toolchain/db.js";
 import { buildLock, doctor, writeLock, type ToolchainLock } from "../toolchain/doctor.js";
 import { currentImage } from "../toolchain/image.js";
 import { loadManifest } from "../toolchain/manifest.js";
@@ -128,6 +128,8 @@ async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog, 
   // Each snapshot is judged independently, so every gap is reported in one scope pass.
   const missingOsv = needsOsv && chosen === undefined;
   if (missingOsv) warnings.push("no OSV vulnerability DB snapshot (needed by the sca lane); run `radr db sync`, then `radr scope` again");
+  const gaps = needsOsv && chosen !== undefined ? doc.stacks.flatMap((s) => STACK_ECOSYSTEM[s] ?? []).filter((e) => !Object.hasOwn(chosen.ecosystems, e)) : [];
+  if (gaps.length > 0) warnings.push(`OSV snapshot ${chosen?.id ?? ""} has no ${[...new Set(gaps)].join(", ")} database: the sca lane will refuse to run (run \`radr db sync\`, then \`radr scope\` again)`);
 
   // EPSS/KEV are fail-open (P7): pin the newest if present, otherwise warn and pin null.
   const epss = needsOsv ? listContext(req.home, "epss").at(-1) : undefined;

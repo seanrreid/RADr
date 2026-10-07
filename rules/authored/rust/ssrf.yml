@@ -1,0 +1,41 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.ssrf
+  languages: [rust]
+  severity: ERROR
+  message: >-
+    Request input controls the URL of a server-side request. Allowlist hosts and schemes and block internal address ranges.
+  metadata:
+    cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+    owasp: ["A10:2021 - Server-Side Request Forgery"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) { ... }
+    - metavariable-regex:
+        metavariable: $T
+        regex: ^(web::|axum::extract::|extract::)?(Path|Query|Json|Form)\b
+    - pattern: $P
+  - pattern: $REQ.match_info().get(...)
+  - pattern: $REQ.uri().query()
+  - pattern: std::env::args()
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: reqwest::get($X)
+      - pattern: reqwest::blocking::get($X)
+      - pattern: $CLIENT.get($X)
+      - pattern: $CLIENT.post($X)
+      - pattern: $CLIENT.request($M, $X)
+      - pattern: ureq::get($X)
+      - pattern: Url::parse($X)
+    - focus-metavariable: $X

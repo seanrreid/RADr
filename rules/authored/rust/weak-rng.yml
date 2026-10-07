@@ -1,0 +1,20 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.weak-rng
+  languages: [rust]
+  severity: WARNING
+  message: >-
+    A non-cryptographic or deterministically seeded RNG is in use. If its output protects anything (tokens, keys, nonces, IDs), use rand::rngs::OsRng or rand::thread_rng().
+  metadata:
+    cwe: ["CWE-338: Use of Cryptographically Weak Pseudo-Random Number Generator (PRNG)"]
+    owasp: ["A02:2021 - Cryptographic Failures"]
+    source: radr
+  pattern-either:
+  - pattern: SmallRng::from_entropy()
+  - pattern: SmallRng::seed_from_u64(...)
+  - pattern: SmallRng::from_seed(...)
+  - pattern: rand::rngs::SmallRng::from_entropy()
+  - pattern: StdRng::seed_from_u64(...)
+  - pattern: rand::rngs::StdRng::seed_from_u64(...)
+  - pattern: XorShiftRng::from_seed(...)
+  - pattern: fastrand::$F(...)

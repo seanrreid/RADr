@@ -1,0 +1,40 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.command-injection
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input reaches a shell command. Pass the command and its arguments separately (system("cmd", arg)) so no shell parses them, or escape with Shellwords.escape.
+  metadata:
+    cwe: ["CWE-78: OS Command Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: Shellwords.escape(...)
+    - pattern: $X.shellescape
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: system($X)
+      - pattern: exec($X)
+      - pattern: spawn($X)
+      - pattern: Kernel.system($X)
+      - pattern: IO.popen($X, ...)
+      - pattern: Open3.capture2($X, ...)
+      - pattern: Open3.capture2e($X, ...)
+      - pattern: Open3.capture3($X, ...)
+      - pattern: Open3.popen3($X, ...)
+      - pattern: '`...#{$X}...`'
+    - focus-metavariable: $X

@@ -1,0 +1,17 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.tls-verification-disabled
+  languages: [rust]
+  severity: ERROR
+  message: >-
+    TLS certificate or hostname verification is disabled, so connections can be intercepted. Remove it, or add the expected CA to the trust store.
+  metadata:
+    cwe: ["CWE-295: Improper Certificate Validation"]
+    owasp: ["A02:2021 - Cryptographic Failures"]
+    source: radr
+  pattern-either:
+  - pattern: $B.danger_accept_invalid_certs(true)
+  - pattern: $B.danger_accept_invalid_hostnames(true)
+  - pattern: $B.set_verify(SslVerifyMode::NONE)
+  - pattern: $B.set_verify(openssl::ssl::SslVerifyMode::NONE)
+  - pattern: $C.dangerous().set_certificate_verifier(...)

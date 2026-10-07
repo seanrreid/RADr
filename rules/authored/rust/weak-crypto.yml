@@ -1,0 +1,29 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.weak-crypto
+  languages: [rust]
+  severity: WARNING
+  message: >-
+    MD5, SHA-1, DES/3DES, RC4 and ECB mode are broken for security purposes (signatures, password hashing, integrity). Use SHA-256+, an AEAD cipher (AES-GCM, ChaCha20-Poly1305), and argon2/bcrypt for passwords.
+  metadata:
+    cwe: ["CWE-327: Use of a Broken or Risky Cryptographic Algorithm"]
+    owasp: ["A02:2021 - Cryptographic Failures"]
+    source: radr
+  pattern-either:
+  - pattern: md5::compute(...)
+  - pattern: Md5::new()
+  - pattern: Md5::digest(...)
+  - pattern: Sha1::new()
+  - pattern: Sha1::digest(...)
+  - pattern: sha1::Sha1::new()
+  - pattern: openssl::hash::MessageDigest::md5()
+  - pattern: openssl::hash::MessageDigest::sha1()
+  - pattern: MessageDigest::md5()
+  - pattern: MessageDigest::sha1()
+  - pattern: Cipher::des_ecb()
+  - pattern: Cipher::des_cbc()
+  - pattern: Cipher::des_ede3_cbc()
+  - pattern: Cipher::rc4()
+  - pattern: Cipher::aes_128_ecb()
+  - pattern: Cipher::aes_256_ecb()
+  - pattern: Rc4::new(...)

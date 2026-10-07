@@ -1,0 +1,40 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.path-traversal
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input is used as a filesystem path. Reduce it to a name with File.basename and check the expanded path stays inside the intended directory.
+  metadata:
+    cwe: ["CWE-22: Path Traversal"]
+    owasp: ["A01:2021 - Broken Access Control"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: File.basename(...)
+    - pattern: $X.to_i
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: File.open($X, ...)
+      - pattern: File.read($X, ...)
+      - pattern: File.readlines($X, ...)
+      - pattern: File.new($X, ...)
+      - pattern: File.write($X, ...)
+      - pattern: File.delete($X, ...)
+      - pattern: IO.read($X, ...)
+      - pattern: FileUtils.rm_rf($X, ...)
+      - pattern: send_file($X, ...)
+      - pattern: Rails.root.join($X, ...)
+    - focus-metavariable: $X

@@ -1,0 +1,39 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.sqli
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input is interpolated into SQL. Pass values as bind parameters (where("name = ?", value) or where(name: value)) instead of building the string.
+  metadata:
+    cwe: ["CWE-89: SQL Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: $M.where("...#{$X}...", ...)
+      - pattern: $M.where($X + $Y, ...)
+      - pattern: $M.order($X, ...)
+      - pattern: $M.reorder($X, ...)
+      - pattern: $M.group($X, ...)
+      - pattern: $M.having($X, ...)
+      - pattern: $M.joins("...#{$X}...")
+      - pattern: $M.find_by_sql("...#{$X}...", ...)
+      - pattern: $M.find_by_sql($X, ...)
+      - pattern: $C.execute($X, ...)
+      - pattern: $C.select_all($X, ...)
+      - pattern: $C.exec_query($X, ...)
+      - pattern: $M.pluck($X)
+    - focus-metavariable: $X

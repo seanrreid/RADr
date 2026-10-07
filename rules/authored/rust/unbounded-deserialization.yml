@@ -1,0 +1,17 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.unbounded-deserialization
+  languages: [rust]
+  severity: WARNING
+  message: >-
+    bincode is decoding without a size limit, so a crafted length prefix can make it allocate huge buffers. Use bincode::options().with_limit(N) (bincode 1) or a config with a limit (bincode 2).
+  metadata:
+    cwe: ["CWE-770: Allocation of Resources Without Limits or Throttling"]
+    owasp: ["A04:2021 - Insecure Design"]
+    source: radr
+  pattern-either:
+  - pattern: bincode::deserialize(...)
+  - pattern: bincode::deserialize_from(...)
+  - patterns:
+    - pattern: bincode::options(). ... .deserialize(...)
+    - pattern-not: bincode::options(). ... .with_limit(...). ... .deserialize(...)

@@ -1,0 +1,34 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.code-injection
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input is evaluated as code or used to pick a method/class (eval, send, constantize). Map allowed values to code explicitly.
+  metadata:
+    cwe: ["CWE-94: Code Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: eval($X, ...)
+      - pattern: $O.instance_eval($X, ...)
+      - pattern: $O.class_eval($X, ...)
+      - pattern: $O.send($X, ...)
+      - pattern: $O.public_send($X, ...)
+      - pattern: $X.constantize
+      - pattern: $X.safe_constantize
+      - pattern: Object.const_get($X, ...)
+    - focus-metavariable: $X

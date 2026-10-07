@@ -1,0 +1,36 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.ssrf
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input controls the URL of a server-side request (and Kernel#open/URI.open can also run commands or read files). Allowlist hosts and schemes and block internal ranges.
+  metadata:
+    cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+    owasp: ["A10:2021 - Server-Side Request Forgery"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: URI.open($X, ...)
+      - pattern: open($X, ...)
+      - pattern: URI($X)
+      - pattern: URI.parse($X)
+      - pattern: Net::HTTP.get($X, ...)
+      - pattern: HTTParty.get($X, ...)
+      - pattern: HTTParty.post($X, ...)
+      - pattern: Faraday.get($X, ...)
+      - pattern: RestClient.get($X, ...)
+      - pattern: Excon.get($X, ...)
+    - focus-metavariable: $X

@@ -138,7 +138,7 @@ stacks:
       - { cwe: 434,  focus: "move_uploaded_file without type/extension validation", seed: [author] }
       - { cwe: 918,  focus: "curl/file_get_contents with request-derived URL", seed: [author] }
       - { cwe: 611,  focus: "XXE: libxml entity loading enabled", seed: [author], supplement: true }
-    note: "Psalm taint (MIT) carries PHP security until authored rules exist (Appendix B)."
+    note: "Covered by radr's authored rules (rules/authored/php, M3 W3), all fixture-tested."
 
   ruby:
     targets:
@@ -152,7 +152,7 @@ stacks:
       - { cwe: 601,  focus: "redirect_to params[...]", seed: [author], supplement: true }
       - { cwe: 918,  focus: "Net::HTTP/open-uri/HTTParty with input", seed: [author] }
       - { cwe: 352,  focus: "skip_forgery_protection / protect_from_forgery disabled", seed: [author] }
-    note: "No permissive Ruby rules exist (Appendix B). Brakeman runs when the client supplies a license (PRD §20 #8)."
+    note: "No permissive Ruby rules exist (Appendix B); covered by radr's authored rules (rules/authored/ruby, M3 W3). Brakeman runs when the client supplies a license (PRD §20 #8)."
 
   csharp:
     targets:

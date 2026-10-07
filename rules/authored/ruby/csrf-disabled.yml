@@ -1,0 +1,18 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.csrf-disabled
+  languages: [ruby]
+  severity: WARNING
+  message: >-
+    CSRF protection is disabled for this controller. Keep protect_from_forgery on for cookie-authenticated actions; skip it only for token-authenticated APIs.
+  metadata:
+    cwe: ["CWE-352: Cross-Site Request Forgery (CSRF)"]
+    owasp: ["A01:2021 - Broken Access Control"]
+    source: radr
+  pattern-either:
+  - pattern: skip_forgery_protection
+  - pattern: skip_forgery_protection(...)
+  - pattern: skip_before_action :verify_authenticity_token
+  - pattern: skip_before_action :verify_authenticity_token, ...
+  - pattern: $C.allow_forgery_protection = false
+  - pattern: $C.default_protect_from_forgery = false

@@ -1,0 +1,39 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.php.ssrf
+  languages: [php]
+  severity: ERROR
+  message: >-
+    Request input controls the URL of a server-side request. Allowlist hosts and schemes, and block internal address ranges.
+  metadata:
+    cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+    owasp: ["A10:2021 - Server-Side Request Forgery"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: $_GET
+    - pattern: $_POST
+    - pattern: $_REQUEST
+    - pattern: $_COOKIE
+    - pattern: $_FILES
+    - pattern: file_get_contents("php://input")
+    - patterns:
+      - pattern: $REQ->$M(...)
+      - metavariable-regex:
+          metavariable: $REQ
+          regex: ^\$(request|req)$
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(input|query|get|post|cookie|header|all|string|integer|json|route)$
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: curl_init($X)
+      - pattern: curl_setopt($C, CURLOPT_URL, $X)
+      - pattern: file_get_contents($X, ...)
+      - pattern: get_headers($X, ...)
+      - pattern: $CLIENT->request($M, $X, ...)
+      - pattern: Http::get($X, ...)
+      - pattern: Http::post($X, ...)
+    - focus-metavariable: $X

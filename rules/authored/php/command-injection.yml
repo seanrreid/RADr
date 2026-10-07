@@ -1,0 +1,43 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.php.command-injection
+  languages: [php]
+  severity: ERROR
+  message: >-
+    Request input reaches a shell command. Avoid the shell (use proc_open with an argument array), or escape every argument with escapeshellarg().
+  metadata:
+    cwe: ["CWE-78: OS Command Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: $_GET
+    - pattern: $_POST
+    - pattern: $_REQUEST
+    - pattern: $_COOKIE
+    - pattern: $_FILES
+    - pattern: file_get_contents("php://input")
+    - patterns:
+      - pattern: $REQ->$M(...)
+      - metavariable-regex:
+          metavariable: $REQ
+          regex: ^\$(request|req)$
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(input|query|get|post|cookie|header|all|string|integer|json|route)$
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: escapeshellarg(...)
+    - pattern: intval(...)
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: exec($X, ...)
+      - pattern: system($X, ...)
+      - pattern: shell_exec($X)
+      - pattern: passthru($X, ...)
+      - pattern: popen($X, ...)
+      - pattern: proc_open($X, ...)
+      - pattern: pcntl_exec($X, ...)
+    - focus-metavariable: $X

@@ -1,0 +1,28 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.open-redirect
+  languages: [ruby]
+  severity: WARNING
+  message: >-
+    Request input decides the redirect target. Redirect only to paths you build, or check the URL against an allowlist (Rails 7: allow_other_host: false).
+  metadata:
+    cwe: ["CWE-601: URL Redirection to Untrusted Site ('Open Redirect')"]
+    owasp: ["A01:2021 - Broken Access Control"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: redirect_to($X, ...)
+      - pattern: 'redirect_back(fallback_location: $X, ...)'
+    - focus-metavariable: $X

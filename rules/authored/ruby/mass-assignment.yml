@@ -1,0 +1,20 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.mass-assignment
+  languages: [ruby]
+  severity: WARNING
+  message: >-
+    All request parameters are permitted for mass assignment, so a client can set any attribute (e.g. admin, role). Permit an explicit list of attributes.
+  metadata:
+    cwe: ["CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"]
+    owasp: ["A08:2021 - Software and Data Integrity Failures"]
+    source: radr
+  pattern-either:
+  - pattern: $P.permit!
+  - pattern: $M.new(params)
+  - pattern: $M.create(params)
+  - pattern: $M.create!(params)
+  - pattern: $M.update(params)
+  - pattern: $M.update!(params)
+  - pattern: $M.assign_attributes(params)
+  - pattern: $M.update_attributes(params)

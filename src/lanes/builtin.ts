@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { ParseError, eslintAdapter, gitleaksAdapter, opengrepAdapter, osvAdapter, ruffAdapter, sccMetrics } from "../normalize/adapters.js";
 import { ESLINT_BASELINE } from "../toolchain/install.js";
+import { OSV_SUBDIR, STACK_ECOSYSTEM } from "../toolchain/db.js";
+import { stableSort } from "../core/determinism.js";
 import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type ToolRun } from "./lane.js";
 import { bin, combine, realWorktree, snippetReader, step, type StepOutcome } from "./steps.js";
 import { hygiene, iac, license, maint } from "./health.js";
@@ -106,12 +108,19 @@ export const sca: Lane = {
   tools: ["osv-scanner", "syft"],
   async run(ctx) {
     const wt = realWorktree(ctx);
-    if (ctx.tools.osvDb === null) return { outcome: "tool-missing", tools: [], findings: [], detail: "no OSV snapshot pinned (snapshots.lock)" };
+    const osvDb = ctx.tools.osvDb;
+    if (osvDb === null) return { outcome: "tool-missing", tools: [], findings: [], detail: "no OSV snapshot pinned (snapshots.lock)" };
+    // osv-scanner offline exits 127 with a generic error when an ecosystem's DB is absent; say which.
+    const needed = stableSort([...new Set(ctx.doc.stacks.flatMap((s) => STACK_ECOSYSTEM[s] ?? []))], (e) => e);
+    const absent = needed.filter((e) => !existsSync(path.join(osvDb, OSV_SUBDIR, e, "all.zip")));
+    if (absent.length > 0) return { outcome: "tool-missing", tools: [], findings: [], detail: `the pinned OSV snapshot has no ${absent.join(", ")} database (run \`radr db sync\`, then \`radr scope\`)` };
     const osv = await step(ctx, "sca", "osv-scanner", "osv-scanner.json",
       () => ctx.tools.exec({
         command: bin(ctx, "osv-scanner"),
-        args: ["scan", "source", "--offline", "--format", "json", "-r", "."],
-        cwd: wt, env: toolEnv(ctx, { OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: ctx.tools.osvDb ?? "" }),
+        // No call analysis (it runs only when a Go/Rust toolchain happens to be on PATH, so host and
+        // image would differ) and no transitive resolution (it needs registries): lockfiles only.
+        args: ["scan", "source", "--offline", "--no-call-analysis=all", "--no-resolve", "--format", "json", "-r", "."],
+        cwd: wt, env: toolEnv(ctx, { OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: osvDb }),
         okExitCodes: [0, 1, 128], // 1 = vulnerabilities found, 128 = no packages found
       }),
       (raw, ref) => (raw.trim() === "" ? [] : osvAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["osv-scanner"] ?? "", snippet: () => null })));

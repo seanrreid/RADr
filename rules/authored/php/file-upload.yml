@@ -1,0 +1,18 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.php.file-upload
+  languages: [php]
+  severity: WARNING
+  message: >-
+    An uploaded file is stored under the client-supplied name, so a .php upload can land in a web-served directory. Generate the stored name server-side and validate the type/extension against an allowlist.
+  metadata:
+    cwe: ["CWE-434: Unrestricted Upload of File with Dangerous Type"]
+    owasp: ["A04:2021 - Insecure Design"]
+    source: radr
+  pattern-either:
+  - pattern: move_uploaded_file($TMP, <... $_FILES[$K]['name'] ...>)
+  - patterns:
+    - pattern-inside: |
+        $N = <... $_FILES[$K]['name'] ...>;
+        ...
+    - pattern: move_uploaded_file($TMP, <... $N ...>)

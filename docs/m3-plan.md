@@ -127,3 +127,32 @@
 - Verified with real tools: host-vs-container findings hashes stay identical with `maint`. A
   container e2e on a health fixture finds every planted signal across all four lanes, and two
   runs produce identical hashes.
+
+### W3 — Stacks, static
+
+- `STACKS` now includes go, rust, java-kotlin (the JVM), php, ruby and csharp (.NET). The keys
+  match `rules/targets.yml`. Detection reads each stack's manifests and lockfiles plus its
+  source extensions, and skips build output (`target/`, `bin/`, `obj/`, `.gradle/`,
+  `.bundle/`). Scala, Swift, C/C++, Elixir and Dart are recognized and reported as
+  unsupported.
+- `radr db sync` now pulls all 8 OSV ecosystems: npm, PyPI, Go, crates.io, Maven, Packagist,
+  RubyGems and NuGet. The new seven total about 80 MB; npm alone is about 220 MB. The sca
+  lane checks that the pinned snapshot covers every detected stack's ecosystem. If one is
+  missing, it reports `tool-missing` and names the ecosystem. Without this check,
+  osv-scanner offline fails with a generic exit 127. `radr scope` warns about the same gap.
+- osv-scanner runs with `--no-call-analysis=all --no-resolve`. Call analysis only runs when a
+  Go or Rust toolchain happens to be on PATH, which would make host and image results
+  differ. Transitive resolution needs registries. Lockfiles and pinned manifests are read
+  offline for every stack (verified: go.mod, Cargo.lock, pom.xml, gradle.lockfile,
+  composer.lock, Gemfile.lock, packages.lock.json and .csproj).
+- **Authored rules for PHP, Ruby and Rust.** Each stack has 10 rules, one per top-10 target,
+  and each has positive and negative fixtures under `opengrep test`. Every stack in
+  `radr rules coverage` is now **supported**. The unit test also checks that removing the
+  authored rules shows PHP, Ruby and Rust as partial again.
+  - PHP and Ruby rules use taint mode: superglobals or `params`/`cookies` flow to sinks.
+  - Rust rules use taint mode for paths, SSRF and commands, with axum/actix extractors as
+    sources (Opengrep's Rust taint works, including destructured extractors).
+  - Rust crypto, TLS, unsafe-memory, cast and bincode rules match patterns.
+- AC11: a polyglot fixture holds one service per new stack. Each has a lockfile with a
+  vendored OSV advisory and a planted SAST signal. The real-tool e2e confirms that all six
+  stacks are detected and that every advisory and SAST finding is found.

@@ -1,0 +1,41 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.path-traversal
+  languages: [rust]
+  severity: ERROR
+  message: >-
+    Request input is used as a filesystem path. Reject components other than Normal (no .., no absolute paths) and check the canonicalized path stays under the base directory.
+  metadata:
+    cwe: ["CWE-22: Path Traversal"]
+    owasp: ["A01:2021 - Broken Access Control"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) { ... }
+    - metavariable-regex:
+        metavariable: $T
+        regex: ^(web::|axum::extract::|extract::)?(Path|Query|Json|Form)\b
+    - pattern: $P
+  - pattern: $REQ.match_info().get(...)
+  - pattern: $REQ.uri().query()
+  - pattern: std::env::args()
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: std::fs::$FN($X, ...)
+      - pattern: fs::$FN($X, ...)
+      - pattern: tokio::fs::$FN($X, ...)
+      - pattern: File::open($X)
+      - pattern: File::create($X)
+      - pattern: $BASE.join($X)
+      - pattern: NamedFile::open($X)
+    - focus-metavariable: $X

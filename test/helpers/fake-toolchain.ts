@@ -114,12 +114,12 @@ export function setFakeJscpd(home: string, report: unknown): void {
 }
 
 /** An OSV snapshot. Defaults to placeholder bytes; pass real zips for scanning tests. */
-export async function seedFakeSnapshot(home: string, iso = "2026-10-01T00:00:00Z", zips?: Readonly<Record<string, string>>): Promise<string> {
+export async function seedFakeSnapshot(home: string, iso = "2026-10-01T00:00:00Z", zips?: Readonly<Record<string, string>>, ecosystems?: readonly string[]): Promise<string> {
   const info = await syncOsv(home, fixedClock(iso), (url) => {
     const eco = url.split("/").at(-2) ?? "";
     const zip = zips?.[eco];
     return Promise.resolve(zip !== undefined ? new Uint8Array(readFileSync(zip)) : new TextEncoder().encode(`fake db for ${url}`));
-  });
+  }, ecosystems);
   return info.id;
 }
 

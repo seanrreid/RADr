@@ -1,0 +1,47 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.command-injection
+  languages: [rust]
+  severity: ERROR
+  message: >-
+    Request input reaches a command run through a shell (sh -c) or chooses the program. Run the program directly with fixed name and pass input as separate .arg() values.
+  metadata:
+    cwe: ["CWE-78: OS Command Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) -> $R { ... }
+      - pattern-inside: |
+          fn $F(..., $P: $T, ...) { ... }
+      - pattern-inside: |
+          async fn $F(..., $P: $T, ...) { ... }
+    - metavariable-regex:
+        metavariable: $T
+        regex: ^(web::|axum::extract::|extract::)?(Path|Query|Json|Form)\b
+    - pattern: $P
+  - pattern: $REQ.match_info().get(...)
+  - pattern: $REQ.uri().query()
+  - pattern: std::env::args()
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: Command::new($X)
+      - pattern: std::process::Command::new($X)
+      - patterns:
+        - pattern-either:
+          - pattern-inside: Command::new("$SH").arg("$FLAG"). ... .arg($X)
+          - pattern-inside: std::process::Command::new("$SH").arg("$FLAG"). ... .arg($X)
+        - metavariable-regex:
+            metavariable: $SH
+            regex: ^(sh|bash|zsh|dash|cmd|cmd\.exe|powershell|pwsh)$
+        - metavariable-regex:
+            metavariable: $FLAG
+            regex: ^(-c|/C|/c|-Command)$
+        - pattern: $X
+    - focus-metavariable: $X

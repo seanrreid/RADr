@@ -20,7 +20,8 @@ export const CONTAINER_LANES: readonly string[] = ["license", "iac"];
 export const OPTIONAL_LANES: readonly string[] = ["hygiene"];
 /** The triage tier runs this fixed set (PRD §5): fast, static, no sandbox. */
 export const TRIAGE_LANES: readonly (typeof LANES)[number][] = ["census", "lint", "secrets", "sca", "history", "tests", "maint"];
-export const STACKS = ["typescript-javascript", "python"] as const;
+/** Supported stacks (keys match rules/targets.yml). java-kotlin = the JVM; csharp = .NET. */
+export const STACKS = ["typescript-javascript", "python", "go", "rust", "java-kotlin", "php", "ruby", "csharp"] as const;
 
 export interface EngagementDoc {
   readonly version: 1;

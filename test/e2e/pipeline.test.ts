@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { FAKE_AWS_KEY_ID, makeFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { FAKE_AWS_KEY_ID, POLYGLOT, makeFixtureRepo, makePolyglotFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const TOOLS_HOME = process.env["RADR_E2E_TOOLS"];
@@ -21,7 +21,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const bin = path.join(repoRoot, "bin", "radr.js");
 const osvFixtures = path.join(repoRoot, "test", "fixtures", "osv");
 
-const ADVISORIES = { npm: ["GHSA-35jh-r3h4-6jhm.json"], PyPI: ["PYSEC-2018-28.json"] } as const;
+const ADVISORIES = {
+  npm: ["GHSA-35jh-r3h4-6jhm.json"], PyPI: ["PYSEC-2018-28.json"], Go: ["GO-2022-1059.json"], "crates.io": ["RUSTSEC-2020-0071.json"],
+  Maven: ["GHSA-jfh8-c2jp-5v3q.json"], Packagist: ["GHSA-q7rv-6hp3-vh96.json"], RubyGems: ["GHSA-3h57-hmj3-gj3p.json"], NuGet: ["GHSA-5crp-9r3c-p9vr.json"],
+} as const;
 
 interface Env { readonly TZ: string; readonly LANG: string }
 
@@ -59,7 +62,7 @@ async function freshHome(env: Env): Promise<string> {
   return home;
 }
 
-async function fullPipeline(fixture: FixtureRepo, env: Env): Promise<{ home: string; hash: string; findings: Record<string, unknown>[] }> {
+async function fullPipeline(fixture: FixtureRepo, env: Env, onScope?: (out: string) => void): Promise<{ home: string; hash: string; findings: Record<string, unknown>[] }> {
   const home = await freshHome(env);
   const steps: string[][] = [
     ["init", "acme", "e2e"],
@@ -71,6 +74,7 @@ async function fullPipeline(fixture: FixtureRepo, env: Env): Promise<{ home: str
     const r = await radr(home, env, ...s);
     assert.equal(r.code, 0, `radr ${s.join(" ")} failed:\n${r.out}\n${r.err}`);
     if (s[0] === "review") assert.match(r.out, /run R-0001: complete/, r.out);
+    if (s[0] === "scope") onScope?.(r.out);
   }
   const hash = (await radr(home, env, "findings", "-e", "acme-e2e", "--hash")).out.trim();
   const json = (await radr(home, env, "findings", "-e", "acme-e2e", "--json")).out.trim().split("\n");
@@ -152,5 +156,16 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     assert.match(a.hash, /^sha256:[0-9a-f]{64}$/);
     assert.equal(a.hash, b.hash);
     assert.deepEqual(a.findings.map((f) => f["id"]), b.findings.map((f) => f["id"]));
+  });
+
+  it("M3: every new stack is detected, and sca and sast find its planted signals (AC11)", async () => {
+    const poly = await makePolyglotFixtureRepo(path.join(fixtureRoot, "polyglot"));
+    let scopeOut = "";
+    const { findings } = await fullPipeline(poly, { TZ: "UTC", LANG: "C" }, (out) => { scopeOut = out; });
+    for (const [stack, want] of Object.entries(POLYGLOT)) {
+      assert.match(scopeOut, new RegExp(stack), `scope detects ${stack}`);
+      assert.ok(findings.some((f) => f["lane"] === "sca" && f["rule_id"] === want.advisory), `${stack}: sca finds ${want.advisory}`);
+      assert.ok(findings.some((f) => f["lane"] === "sast" && f["rule_id"] === want.rule), `${stack}: sast finds ${want.rule}`);
+    }
   });
 });

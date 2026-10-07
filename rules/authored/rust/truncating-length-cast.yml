@@ -1,0 +1,20 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.truncating-length-cast
+  languages: [rust]
+  severity: WARNING
+  message: >-
+    A length or size is narrowed with `as`, which silently truncates large values (and length prefixes then disagree with the data). Use u32::try_from(len)? and handle the error.
+  metadata:
+    cwe: ["CWE-190: Integer Overflow or Wraparound", "CWE-197: Numeric Truncation Error"]
+    owasp: ["A04:2021 - Insecure Design"]
+    source: radr
+  patterns:
+  - pattern-either:
+    - pattern: $X.len() as $T
+    - pattern: ($X.len() + $Y) as $T
+    - pattern: ($X.len() - $Y) as $T
+    - pattern: ($X.len() * $Y) as $T
+  - metavariable-regex:
+      metavariable: $T
+      regex: ^(u8|u16|u32|i8|i16|i32)$

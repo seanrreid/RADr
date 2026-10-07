@@ -1,0 +1,33 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.unsafe-deserialization
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input is deserialized with a loader that can instantiate arbitrary objects (Marshal, YAML.unsafe_load, Oj object mode). Use JSON.parse or YAML.safe_load.
+  metadata:
+    cwe: ["CWE-502: Deserialization of Untrusted Data"]
+    owasp: ["A08:2021 - Software and Data Integrity Failures"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: Marshal.load($X, ...)
+      - pattern: Marshal.restore($X, ...)
+      - pattern: YAML.unsafe_load($X, ...)
+      - pattern: YAML.load($X, ...)
+      - pattern: Psych.unsafe_load($X, ...)
+      - pattern: Oj.load($X, ...)
+      - pattern: Oj.object_load($X, ...)
+    - focus-metavariable: $X

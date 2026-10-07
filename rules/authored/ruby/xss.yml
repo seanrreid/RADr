@@ -1,0 +1,35 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.ruby.xss
+  languages: [ruby]
+  severity: ERROR
+  message: >-
+    Request input is marked HTML-safe, which disables Rails' output escaping. Leave it escaped, or sanitize it with sanitize() and an allowlist.
+  metadata:
+    cwe: ["CWE-79: Cross-site Scripting"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: params
+    - pattern: cookies
+    - pattern: request.params
+    - pattern: request.query_parameters
+    - pattern: request.request_parameters
+    - pattern: request.headers
+    - pattern: request.body.read
+    - pattern: request.raw_post
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: sanitize(...)
+    - pattern: ERB::Util.html_escape(...)
+    - pattern: h(...)
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: $X.html_safe
+      - pattern: raw($X)
+      - pattern: 'render(html: $X, ...)'
+      - pattern: 'render(inline: $X, ...)'
+    - focus-metavariable: $X

@@ -1,0 +1,24 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.unsafe-memory
+  languages: [rust]
+  severity: INFO
+  message: >-
+    Memory-safety audit point: this bypasses Rust's guarantees (transmute, raw slices, set_len, raw-pointer reads). Each use needs a documented invariant and, ideally, a safe alternative.
+  metadata:
+    cwe: ["CWE-119: Improper Restriction of Operations within the Bounds of a Memory Buffer", "CWE-787: Out-of-bounds Write", "CWE-125: Out-of-bounds Read", "CWE-416: Use After Free"]
+    owasp: ["A04:2021 - Insecure Design"]
+    source: radr
+  pattern-either:
+  - pattern: std::mem::transmute(...)
+  - pattern: mem::transmute(...)
+  - pattern: transmute(...)
+  - pattern: std::slice::from_raw_parts(...)
+  - pattern: std::slice::from_raw_parts_mut(...)
+  - pattern: slice::from_raw_parts(...)
+  - pattern: slice::from_raw_parts_mut(...)
+  - pattern: $V.set_len(...)
+  - pattern: std::ptr::read(...)
+  - pattern: std::ptr::write(...)
+  - pattern: $P.get_unchecked(...)
+  - pattern: $P.get_unchecked_mut(...)

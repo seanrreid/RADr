@@ -1,0 +1,50 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.php.sqli
+  languages: [php]
+  severity: ERROR
+  message: >-
+    Request input reaches a SQL query string. Use prepared statements with bound parameters (PDO::prepare + execute, mysqli bind_param) or the query builder's bindings.
+  metadata:
+    cwe: ["CWE-89: SQL Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: $_GET
+    - pattern: $_POST
+    - pattern: $_REQUEST
+    - pattern: $_COOKIE
+    - pattern: $_FILES
+    - pattern: file_get_contents("php://input")
+    - patterns:
+      - pattern: $REQ->$M(...)
+      - metavariable-regex:
+          metavariable: $REQ
+          regex: ^\$(request|req)$
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(input|query|get|post|cookie|header|all|string|integer|json|route)$
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: intval(...)
+    - pattern: (int) $X
+    - pattern: $PDO->quote(...)
+    - pattern: mysqli_real_escape_string(...)
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: mysqli_query($C, $Q, ...)
+      - pattern: $DB->query($Q, ...)
+      - pattern: $DB->exec($Q)
+      - pattern: $DB->prepare($Q, ...)
+      - pattern: DB::raw($Q, ...)
+      - pattern: DB::select($Q, ...)
+      - pattern: DB::statement($Q, ...)
+      - pattern: DB::unprepared($Q)
+      - pattern: $B->whereRaw($Q, ...)
+      - pattern: $B->orderByRaw($Q, ...)
+      - pattern: $B->selectRaw($Q, ...)
+      - pattern: $B->havingRaw($Q, ...)
+    - focus-metavariable: $Q

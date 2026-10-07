@@ -17,7 +17,11 @@ import { parseYaml } from "../core/yaml.js";
 import type { Fetcher } from "./install.js";
 import type { ContextSnapshot } from "./vulnctx.js";
 
-export const OSV_ECOSYSTEMS = ["npm", "PyPI"] as const;
+export const OSV_ECOSYSTEMS = ["npm", "PyPI", "Go", "crates.io", "Maven", "Packagist", "RubyGems", "NuGet"] as const;
+/** The OSV ecosystem each stack's lockfiles resolve against (sca needs it in the pinned snapshot). */
+export const STACK_ECOSYSTEM: Readonly<Record<string, (typeof OSV_ECOSYSTEMS)[number]>> = {
+  "typescript-javascript": "npm", python: "PyPI", go: "Go", rust: "crates.io", "java-kotlin": "Maven", php: "Packagist", ruby: "RubyGems", csharp: "NuGet",
+};
 /** osv-scanner v2 reads $OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY/osv-scalibr/<ecosystem>/all.zip. */
 export const OSV_SUBDIR = "osv-scalibr";
 const OSV_BUCKET = "https://osv-vulnerabilities.storage.googleapis.com";

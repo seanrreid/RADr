@@ -1,0 +1,18 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.php.xxe
+  languages: [php]
+  severity: ERROR
+  message: >-
+    XML is parsed with external entity loading enabled (LIBXML_NOENT / LIBXML_DTDLOAD, or libxml_disable_entity_loader(false)). Drop those flags so entities are not expanded.
+  metadata:
+    cwe: ["CWE-611: Improper Restriction of XML External Entity Reference"]
+    owasp: ["A05:2021 - Security Misconfiguration"]
+    source: radr
+  pattern-either:
+  - pattern: libxml_disable_entity_loader(false)
+  - patterns:
+    - pattern: $F(...)
+    - pattern-either:
+      - pattern: $F(..., <... LIBXML_NOENT ...>, ...)
+      - pattern: $F(..., <... LIBXML_DTDLOAD ...>, ...)

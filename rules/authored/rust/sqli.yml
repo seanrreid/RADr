@@ -1,0 +1,22 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.rust.sqli
+  languages: [rust]
+  severity: ERROR
+  message: >-
+    A SQL statement is built with format!. Use bind parameters (sqlx::query("... $1").bind(v), diesel's DSL, rusqlite params![]) instead of interpolating values.
+  metadata:
+    cwe: ["CWE-89: SQL Injection"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  patterns:
+  - pattern-either:
+    - pattern: $F(&format!(...), ...)
+    - pattern: $F(format!(...).as_str(), ...)
+    - pattern: $F(format!(...), ...)
+    - pattern: $O.$F(&format!(...), ...)
+    - pattern: $O.$F(format!(...).as_str(), ...)
+    - pattern: $O.$F(format!(...), ...)
+  - metavariable-regex:
+      metavariable: $F
+      regex: (^|::)(query|query_as|query_scalar|sql_query|execute|query_row|query_map|prepare|batch_execute|simple_query)$
