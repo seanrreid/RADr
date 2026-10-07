@@ -170,5 +170,14 @@ describe("M3 container toolchain end-to-end (real runtime)", { skip: ENABLED ? f
     has("scancode GPL-3.0-only source", (f) => f["tool"] === "scancode" && f["file"] === "vendor/lib.c" && f["severity"] === "high");
     has("AGPL dependency from the SBOM", (f) => f["tool"] === "syft" && f["rule_id"] === "AGPL-3.0-only" && f["severity"] === "critical");
     has("scorecard checks", (f) => f["tool"] === "scorecard" && f["rule_id"] === "Security-Policy");
+
+    // W4: the report's license inventory and hygiene sections come from the lanes' metrics.
+    await radr("address", "-e", "acme-h1");
+    const report = readFileSync(path.join(home, "engagements", "acme-h1", "report", "report.md"), "utf8");
+    assert.match(report, /# Licenses/);
+    assert.match(report, /\| strong-copyleft \| 1 \| 0 \|/);
+    assert.match(report, /\| network-copyleft \| 0 \| 1 \|/);
+    assert.match(report, /# Repository hygiene/);
+    assert.match(report, /Toolchain \| container image sha256:/);
   });
 });

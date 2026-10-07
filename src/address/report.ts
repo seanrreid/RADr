@@ -12,6 +12,8 @@ import { SEVERITIES } from "../findings/types.js";
 import { sevRank } from "../rubric/rubric.js";
 import { readSnapshotsLock } from "../toolchain/db.js";
 import { readLock } from "../toolchain/doctor.js";
+import { pyToolVersions } from "../toolchain/image.js";
+import { ALL_PACKS, humanReviewTop25, ruleCoverage } from "../rules/pack.js";
 import { dispositionsHash, type RunInputs } from "./inputs.js";
 import { applyKeeps, code, esc, extractKeeps, keep, table } from "./markdown.js";
 import { buildPlan, type PlanWave } from "./plan.js";
@@ -90,10 +92,33 @@ function coverageSection(inp: RunInputs): string | null {
     stableSort(Object.entries(stacks), ([k]) => k).map(([k, m]) => [esc(k), esc(m.status), pctText(m.line_pct), pctText(m.branch_pct)]));
 }
 
+const PACK_LABEL: Readonly<Record<string, string>> = {
+  authored: "radr authored", pack: "vendored permissive (GitLab sast-rules MIT/Apache-2.0, elttam)", lgpl: "LGPL-3.0 sub-pack (GitLab sast-rules)",
+};
+
+/** SAST rule packs and the per-stack support bar (PRD §14.2) for the stacks this review covered. */
+function sastSupport(inp: RunInputs): string[] {
+  if (!inp.lanes.has("sast")) return [];
+  const packs = inp.doc.rule_packs ?? ALL_PACKS;
+  const cov = ruleCoverage(packs).filter((c) => (inp.doc.stacks as readonly string[]).includes(c.stack));
+  const rows = cov.map((c) => [esc(c.stack), c.supported ? "supported" : "partial", `${String(c.covered.length)}/${String(c.covered.length + c.missing.length)}`,
+    String(c.rules), c.missing.length === 0 ? "—" : esc(c.missing.map((m) => `CWE-${String(m)}`).join(", "))]);
+  const out = ["", "**Static analysis (SAST) coverage**", "",
+    `Rule packs: ${esc(packs.map((p) => PACK_LABEL[p] ?? p).join("; "))}. Every rule passes its own positive and negative test fixtures. A stack is *supported* when each of its top-10 weakness targets has at least one rule; *partial* stacks list the gaps.`];
+  if (rows.length > 0) out.push("", table(["Stack", "Support", "Targets", "Rules", "Gaps"], rows));
+  const human = humanReviewTop25();
+  if (human.length > 0) {
+    out.push("", `Not detectable by automated tools, and outside this review unless listed in the findings: ${esc(human.map((h) => `${h.name} (CWE-${String(h.cwe)})`).join("; "))}.`);
+  }
+  return out;
+}
+
 function methodology(inp: RunInputs, l: Layout): string {
   const lock = readLock(l.toolchainLock);
   const snaps = readSnapshotsLock(l.snapshotsLock);
-  const tools = stableSort(Object.entries(lock.tools), ([k]) => k).map(([k, v]) => `${k} ${v.version}`);
+  const toolVersions: Record<string, string> = Object.fromEntries(Object.entries(lock.tools).map(([k, v]) => [k, v.version]));
+  if (lock.mode === "container") Object.assign(toolVersions, pyToolVersions()); // the image's Python tools
+  const tools = stableSort(Object.entries(toolVersions), ([k]) => k).map(([k, v]) => `${k} ${v}`);
   const laneRows = stableSort([...inp.lanes], ([k]) => k).map(([lane, outcome]) => [esc(lane), esc(outcome)]);
   const dismissed = inp.findings.filter((f) => state(inp, f) === "dismissed").length;
   const waived = inp.findings.filter((f) => state(inp, f) === "waived").length;
@@ -105,6 +130,7 @@ function methodology(inp: RunInputs, l: Layout): string {
       ["Engagement type / tier", esc(`${inp.doc.engagement_type} / ${inp.doc.tier}`)],
       ["Run", esc(`${inp.runId} (${inp.runStatus})`)],
       ["Tools", esc(tools.join(", "))],
+      ["Toolchain", lock.mode === "container" && lock.image !== undefined && lock.image !== null ? esc(`container image ${lock.image.id.slice(0, 19)} (network denied)`) : "host (pinned binaries)"],
       ["Sandbox", lock.sandbox === undefined || lock.sandbox === null ? "none" : esc(`${lock.sandbox.runtime} (pinned images)`)],
       ["Vulnerability data", esc([snaps.osv === null ? "OSV: none" : `OSV ${snaps.osv.id}`, snaps.epss ? `EPSS ${snaps.epss.published}` : "EPSS: none", snaps.kev ? `KEV ${snaps.kev.published}` : "KEV: none"].join("; "))],
       ["Severity rubric", esc(inp.rubric.version)],
@@ -116,12 +142,37 @@ function methodology(inp: RunInputs, l: Layout): string {
     "**Lanes**",
     "",
     table(["Lane", "Outcome"], laneRows),
+    ...sastSupport(inp),
   ];
   if (inp.notes.length > 0) lines.push("", "**Gaps**", "", ...inp.notes.map((n) => `- ${esc(n)}`));
   if (defs !== undefined) {
     lines.push("", "**Severity definitions**", "", table(["Severity", "Meaning"], [...SEVERITIES].reverse().map((s: Severity) => [s, esc(defs[s])]), [14, 86]));
   }
   return lines.join("\n");
+}
+
+type ClassCounts = Readonly<Record<string, number>>;
+const LICENSE_ORDER = ["network-copyleft", "restricted", "strong-copyleft", "unknown", "weak-copyleft", "permissive"] as const;
+
+/** License inventory (license lane metrics): counts by §4b class, source files and dependencies. */
+function licenseSection(inp: RunInputs): string | null {
+  const m = inp.metrics["license"] as { files?: ClassCounts; packages?: ClassCounts } | undefined;
+  if (m === undefined || (m.files === undefined && m.packages === undefined)) return null;
+  const n = (c: ClassCounts | undefined, k: string): string => (c === undefined ? "—" : String(c[k] ?? 0));
+  return [
+    "Licenses detected in source files (ScanCode) and declared by dependencies (lockfile metadata), by class. Permissive licenses and the client's own licenses produce no findings.",
+    "",
+    table(["Class", "Source files", "Dependencies"], LICENSE_ORDER.map((k) => [esc(k), n(m.files, k), n(m.packages, k)])),
+    ...(m.packages === undefined ? ["", "Dependency licenses were not assessed (no SBOM from the dependency lane in this run)."] : []),
+  ].join("\n");
+}
+
+/** OpenSSF Scorecard (offline subset) scores, if the optional hygiene lane ran. */
+function hygieneSection(inp: RunInputs): string | null {
+  const checks = (inp.metrics["hygiene"] as { checks?: Readonly<Record<string, number>> } | undefined)?.checks;
+  if (checks === undefined || Object.keys(checks).length === 0) return null;
+  const rows = stableSort(Object.entries(checks), ([k]) => k).map(([k, v]) => [esc(k), v < 0 ? "not applicable" : `${String(v)}/10`]);
+  return `OpenSSF Scorecard, offline checks only (checks that need the network or pull-request history are not run).\n\n${table(["Check", "Score"], rows)}`;
 }
 
 function appendix(inp: RunInputs): string {
@@ -149,6 +200,10 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     parts.push("", "# Findings", "", findingsByCategory(inp));
     const cov = coverageSection(inp);
     if (cov !== null) parts.push("", "# Test coverage", "", cov);
+    const lic = licenseSection(inp);
+    if (lic !== null) parts.push("", "# Licenses", "", lic);
+    const hyg = hygieneSection(inp);
+    if (hyg !== null) parts.push("", "# Repository hygiene", "", hyg);
     parts.push("", "# Remediation overview", "", planSummary(waves));
     parts.push("", "# Recommendations", "", keep("recommendations", "_Consultant recommendations. Preserved across regeneration._"));
   }

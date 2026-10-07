@@ -93,6 +93,13 @@ describe("radr address + approve report (AC10, AC11)", () => {
     const first = readFileSync(p.report, "utf8");
     assert.match(first, /^---\ntitle: "Code review: acme \/ audit"/);
     assert.match(first, /\| F-0001 \| critical \| pending \|/);
+    // M3 W4: the methodology states the SAST support bar for the stacks reviewed, and what no tool covers.
+    assert.match(first, /\*\*Static analysis \(SAST\) coverage\*\*/);
+    assert.match(first, /\| python \| supported \| 10\/10 \|/);
+    assert.match(first, /\| typescript-javascript \| supported \| 10\/10 \|/);
+    assert.doesNotMatch(first, /\| rust \|/, "only the reviewed stacks are listed");
+    assert.match(first, /Missing Authorization \(CWE-862\)/);
+    assert.doesNotMatch(first, /# Licenses/, "no license lane, no license section");
 
     const pending = await radr("approve", "report", "-e", "acme-audit");
     assert.equal(pending.code, 1);

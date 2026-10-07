@@ -127,4 +127,23 @@ describe("image-only and optional lanes", () => {
     assert.match(bad.out, /hygiene\s+parse-error/);
     assert.match(bad.out, /run R-0001: complete/);
   });
+
+  it("the report shows Scorecard's offline scores when hygiene ran (W4)", async () => {
+    const home = tmpDir();
+    await seedHome(home);
+    setFakeTool(home, "scorecard", `echo '{"checks":[{"name":"License","score":0,"reason":"no license"},{"name":"Token-Permissions","score":-1,"reason":"n/a"}]}'`);
+    const radr = cliRunner(home);
+    await radr("init", "acme", "audit");
+    await radr("scope", "-e", "acme-audit", "--source", fixture.dir);
+    const l = layout(home, "acme-audit");
+    writeFileSync(l.engagementYml, readFileSync(l.engagementYml, "utf8").replace("  - maint\n", "  - maint\n  - hygiene\n"));
+    await radr("scope", "-e", "acme-audit");
+    await radr("approve", "scope", "-e", "acme-audit");
+    await radr("review", "-e", "acme-audit");
+    assert.equal((await radr("address", "-e", "acme-audit")).code, 0);
+    const report = readFileSync(path.join(l.dir, "report", "report.md"), "utf8");
+    assert.match(report, /# Repository hygiene/);
+    assert.match(report, /\| License \| 0\/10 \|/);
+    assert.match(report, /\| Token-Permissions \| not applicable \|/);
+  });
 });

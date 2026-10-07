@@ -156,3 +156,19 @@
 - AC11: a polyglot fixture holds one service per new stack. Each has a lockfile with a
   vendored OSV advisory and a planted SAST signal. The real-tool e2e confirms that all six
   stacks are detected and that every advisory and SAST finding is found.
+
+### W4 — Report and rubric
+
+- The rubric base entries and the scorecard's complexity and duplication rows landed in W2.
+- **Methodology additions:**
+  - the toolchain mode (host binaries, or the container image ID with the network denied)
+  - the image's Python tool versions
+  - a **SAST coverage** table: the rule packs used and the support bar for the stacks that
+    were reviewed, with gaps listed by CWE
+  - the Top 25 weaknesses no tool detects (authorization and authentication), stated
+    explicitly
+- **New report sections:**
+  - **Licenses:** an inventory by §4b class, split into source files and dependencies.
+  - **Repository hygiene:** Scorecard's offline scores.
+- ScanCode skips lockfiles. They name dependency licenses as text, which the SBOM already
+  reports; without the skip, the same dependency fact would appear twice.

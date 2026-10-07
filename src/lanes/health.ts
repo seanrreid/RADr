@@ -20,6 +20,9 @@ const LIZARD_EXTS = new Set([
   "php", "pl", "pm", "py", "r", "rb", "rs", "scala", "sol", "swift", "ts", "tsx", "vue", "zig",
 ]);
 const ext = (f: string): string => (f.includes(".") ? (f.split(".").at(-1) ?? "").toLowerCase() : "");
+/** Lockfiles name their dependencies' licenses as text; those are reported once, from the SBOM. */
+const LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "Gemfile.lock", "Cargo.lock",
+  "poetry.lock", "uv.lock", "Pipfile.lock", "packages.lock.json", "go.sum", "gradle.lockfile"];
 const DOCKERFILE = /(^|\/)(Dockerfile|Containerfile)(\.[^/]+)?$|\.(dockerfile|containerfile)$/i;
 
 /** Every lane step that can't run (no inputs) is a success with no findings. */
@@ -89,7 +92,7 @@ export const license: Lane = {
     const scan = await fileStep(ctx, "license", "scancode", report,
       () => ctx.tools.exec({
         command: bin(ctx, "scancode"),
-        args: ["--license", "--strip-root", "--processes", "2", "--quiet", "--ignore", "*/.git/*", "--json", report, "."],
+        args: ["--license", "--strip-root", "--processes", "2", "--quiet", "--ignore", "*/.git/*", ...LOCKFILES.flatMap((f) => ["--ignore", f]), "--json", report, "."],
         cwd: wt, env: toolEnv(ctx, { TYPECODE_LIBMAGIC_DB_PATH: "/usr/lib/file/magic.mgc" }), timeoutMs: 60 * 60 * 1000,
       }),
       (raw, ref) => {

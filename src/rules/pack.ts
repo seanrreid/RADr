@@ -65,6 +65,7 @@ export function packRules(packs: readonly PackName[] = ALL_PACKS): PackRule[] {
 }
 
 interface TargetsDoc {
+  readonly top25?: readonly { readonly rank: number; readonly cwe: number; readonly name: string; readonly detect: string }[];
   readonly stacks: Readonly<Record<string, { readonly targets: readonly { readonly cwe: number; readonly group?: readonly number[]; readonly focus: string }[] }>>;
 }
 
@@ -93,4 +94,10 @@ export function ruleCoverage(packs: readonly PackName[] = ALL_PACKS): StackCover
     }
     return { stack, supported: missing.length === 0, covered, missing, rules: stackRules.length };
   });
+}
+
+/** Top 25 weaknesses no lane detects automatically (authorization, authentication): the report says so. */
+export function humanReviewTop25(): { readonly cwe: number; readonly name: string }[] {
+  const targets = parseYaml(readAsset("rules/targets.yml"), "rules/targets.yml") as TargetsDoc;
+  return (targets.top25 ?? []).filter((t) => t.detect === "judgment").map((t) => ({ cwe: t.cwe, name: t.name }));
 }
