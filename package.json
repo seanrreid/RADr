@@ -1,0 +1,25 @@
+{
+  "name": "@torchcodelab/radr",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RAD Review: deterministic code review engagements (Review, Address, Debug)",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "check:deps": "npm run build && node dist/scripts/check-deps.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.1",
+    "eslint": "10.12.0",
+    "fast-check": "4.10.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1"
+  }
+}
