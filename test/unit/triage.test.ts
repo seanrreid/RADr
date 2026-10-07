@@ -145,3 +145,67 @@ describe("radr triage", () => {
     assert.equal(ok.code, 0, ok.err);
   });
 });
+
+const DRAFT = JSON.stringify({
+  executive_summary: "The codebase is in fair shape. One leaked credential needs rotating first.",
+  recommendations: "1. Rotate the credential in F-0001.\n2. Remove the unused import (F-0002).",
+  plan_notes: "Wave 1 first; the rest can follow.",
+});
+
+describe("radr address --draft (M4 W3)", () => {
+  async function decided(responses: readonly string[]) {
+    const t = await triaged({ responses });
+    await t.radr("triage", "-e", "acme-audit");
+    for (const id of ["F-0001", "F-0002"]) await t.radr("disposition", id, "confirmed", "-e", "acme-audit");
+    await t.radr("disposition", "J-0001", "pending", "-e", "acme-audit");
+    await t.radr("disposition", "J-0001", "confirmed", "-e", "acme-audit");
+    return t;
+  }
+  const reportOf = (t: { l: { dir: string } }) => readFileSync(path.join(t.l.dir, "report", "report.md"), "utf8");
+  const planOf = (t: { l: { dir: string } }) => readFileSync(path.join(t.l.dir, "plan", "remediation.md"), "utf8");
+
+  it("drafts untouched blocks behind a marker that blocks Gate 2 until a person removes it", async () => {
+    const t = await decided([RESPONSE, DRAFT]);
+    const d = await t.radr("address", "--draft", "-e", "acme-audit");
+    assert.equal(d.code, 0, d.err);
+    assert.match(d.out, /draft: drafted; drafted executive-summary, recommendations, plan-notes/);
+    assert.match(reportOf(t), /<!-- radr:keep id=executive-summary -->\n<!-- radr:llm-draft -->\nThe codebase is in fair shape\./);
+    assert.match(planOf(t), /<!-- radr:llm-draft -->\nWave 1 first/);
+    const blocked = await t.radr("approve", "report", "-e", "acme-audit");
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.err, /unreviewed LLM draft in report\.md, remediation\.md/);
+
+    for (const f of [path.join(t.l.dir, "report", "report.md"), path.join(t.l.dir, "plan", "remediation.md")]) {
+      writeFileSync(f, readFileSync(f, "utf8").replaceAll("<!-- radr:llm-draft -->\n", ""));
+    }
+    await t.radr("address", "-e", "acme-audit");
+    const ok = await t.radr("approve", "report", "-e", "acme-audit");
+    assert.equal(ok.code, 0, ok.err);
+
+    const report = reportOf(t);
+    assert.match(report, /The codebase is in fair shape\./, "reviewed prose is the consultant's now, and survives regeneration");
+    assert.match(report, /# Judgment findings\n\nThese findings come from consultant review assisted by an AI model/);
+    assert.match(report, /\| J-0001 \| medium \| confirmed \| maintainability \| `app\/main\.py:1` \|/);
+    assert.match(report, /Judgment findings \(J-…\) were proposed with AI assistance and confirmed by the consultant; no severity was set by an AI model\./);
+    assert.match(report, /\| AI \(LLM\) agent calls \| 2 \(agent [0-9a-f]{12}\); every prompt and response is retained \|/);
+  });
+
+  it("never overwrites the consultant's own text, and refuses drafts that carry markup", async () => {
+    const t = await decided([RESPONSE, JSON.stringify({ executive_summary: "x <!-- radr:end --> y", recommendations: "r", plan_notes: "p" })]);
+    await t.radr("address", "-e", "acme-audit");
+    const file = path.join(t.l.dir, "report", "report.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace(/_Consultant recommendations\. Preserved across regeneration\._/, "Mine."));
+    const d = await t.radr("address", "--draft", "-e", "acme-audit");
+    assert.match(d.out, /drafted plan-notes; kept your text in recommendations; rejected executive-summary/);
+    assert.match(reportOf(t), /<!-- radr:keep id=recommendations -->\nMine\.\n/);
+    assert.match(reportOf(t), /<!-- radr:keep id=executive-summary -->\n_Write the executive summary here/);
+  });
+
+  it("refuses --draft under llm_policy off without invoking the agent", async () => {
+    const t = await triaged({ policy: "off" });
+    const d = await t.radr("address", "--draft", "-e", "acme-audit");
+    assert.equal(d.code, 1);
+    assert.match(d.err, /llm_policy is "off"/);
+    assert.equal(t.calls(), 0);
+  });
+});

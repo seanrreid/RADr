@@ -9,7 +9,9 @@ import { hashBytes, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import type { Layout } from "../engagement/home.js";
 import { findingsSetHash } from "../findings/store.js";
+import path from "node:path";
 import { stateOf } from "../findings/disposition.js";
+import { DRAFT_MARKER, filesWithDrafts } from "../llm/draft.js";
 import { inReviewSet } from "../rubric/rubric.js";
 import { treeHash } from "../sandbox/deps.js";
 import { EventLog } from "../state/events.js";
@@ -81,6 +83,11 @@ export function approveReport(l: Layout, actor: string, clock: Clock, acceptPart
     if (machineOnly.length > 0) {
       throw new RefusedError(`review-set finding(s) confirmed only by the rubric, not by a person: ${machineOnly.slice(0, SHOW_IDS).join(", ")} (confirm, dismiss, or waive them yourself)`);
     }
+  }
+  // An LLM draft (M4) must be read by a person, who deletes its marker, before sign-off.
+  const drafts = filesWithDrafts(l);
+  if (drafts.length > 0) {
+    throw new RefusedError(`unreviewed LLM draft in ${drafts.map((f) => path.basename(f)).join(", ")}: review the text and delete the ${DRAFT_MARKER} line, then run \`radr address\``);
   }
   // Judgment findings (M4) are LLM proposals: each needs a person's decision, and a proposed or
   // pending one blocks sign-off like a pending tool finding does (PRD Gate 2).

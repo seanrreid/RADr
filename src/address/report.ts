@@ -37,6 +37,13 @@ const RATING_LABEL: Readonly<Record<string, string>> = { green: "Good", amber: "
 const VERDICT_LABEL: Readonly<Record<string, string>> = { healthy: "Healthy", "needs-attention": "Needs attention", "at-risk": "At risk" };
 const TOP_RISKS = 10;
 
+/** Keep-block defaults. `radr address --draft` fills only blocks whose body is still this text. */
+export const KEEP_DEFAULTS = {
+  "executive-summary": "_Write the executive summary here. radr preserves this block when the report is regenerated._",
+  recommendations: "_Consultant recommendations. Preserved across regeneration._",
+  "plan-notes": "_Sequencing notes, owners, and constraints. Preserved across regeneration._",
+} as const;
+
 const loc = (f: Finding): string => (f.line > 0 ? `${f.file}:${String(f.line)}` : f.file);
 const state = (inp: RunInputs, f: Finding): string => inp.states.get(f.id) ?? "pending";
 const live = (inp: RunInputs): Finding[] => inp.findings.filter((f) => state(inp, f) !== "dismissed");
@@ -128,8 +135,13 @@ function methodology(inp: RunInputs, l: Layout): string {
   const dismissed = inp.findings.filter((f) => state(inp, f) === "dismissed").length;
   const waived = inp.findings.filter((f) => state(inp, f) === "waived").length;
   const defs = inp.rubric.definitions;
+  const llmCalls = inp.events.filter((e) => e.type === "llm-call");
+  const aiUsed = inp.doc.llm_policy !== "off" || llmCalls.length > 0;
+  const provenance = acceptedJudgments(inp).length === 0
+    ? "Every finding traces to a specific tool's output (rule id and location). No finding was created or rated by an AI model."
+    : "Every tool finding traces to a specific tool's output (rule id and location). Judgment findings (J-…) were proposed with AI assistance and confirmed by the consultant; no severity was set by an AI model.";
   const lines = [
-    `This review analyzed commit ${code(inp.doc.source.sha)} with a pinned, checksum-verified toolchain. Every finding traces to a specific tool's output (rule id and location). No finding was created or rated by an AI model.`,
+    `This review analyzed commit ${code(inp.doc.source.sha)} with a pinned, checksum-verified toolchain. ${provenance}`,
     "",
     table(["Item", "Value"], [
       ["Engagement type / tier", esc(`${inp.doc.engagement_type} / ${inp.doc.tier}`)],
@@ -140,6 +152,7 @@ function methodology(inp: RunInputs, l: Layout): string {
       ["Vulnerability data", esc([snaps.osv === null ? "OSV: none" : `OSV ${snaps.osv.id}`, snaps.epss ? `EPSS ${snaps.epss.published}` : "EPSS: none", snaps.kev ? `KEV ${snaps.kev.published}` : "KEV: none"].join("; "))],
       ["Severity rubric", esc(inp.rubric.version)],
       ["AI (LLM) policy", esc(inp.doc.llm_policy)],
+      ...(aiUsed ? [["AI (LLM) agent calls", esc(aiCallSummary(llmCalls))]] : []),
       ["Network", esc(`${inp.doc.network.mode} (${inp.doc.network.enforcement})`)],
       ["Dismissed / waived findings", `${String(dismissed)} / ${String(waived)}`],
     ]),
@@ -154,6 +167,13 @@ function methodology(inp: RunInputs, l: Layout): string {
     lines.push("", "**Severity definitions**", "", table(["Severity", "Meaning"], [...SEVERITIES].reverse().map((s: Severity) => [s, esc(defs[s])]), [14, 86]));
   }
   return lines.join("\n");
+}
+
+/** "N calls (agent <argv hash prefix>)": every prompt and response is kept in the engagement's llm/. */
+function aiCallSummary(calls: readonly { readonly data: Readonly<Record<string, unknown>> }[]): string {
+  if (calls.length === 0) return "none";
+  const agents = stableSort([...new Set(calls.map((c) => String(c.data["argv_hash"]).slice(7, 19)))], (x) => x);
+  return `${String(calls.length)} (agent ${agents.join(", ")}); every prompt and response is retained`;
 }
 
 type ClassCounts = Readonly<Record<string, number>>;
@@ -180,8 +200,22 @@ function hygieneSection(inp: RunInputs): string | null {
   return `OpenSSF Scorecard, offline checks only (checks that need the network or pull-request history are not run).\n\n${table(["Check", "Score"], rows)}`;
 }
 
+/** Judgments a person accepted (confirmed or waived; M4). Proposed/pending ones block Gate 2. */
+const acceptedJudgments = (inp: RunInputs): Finding[] => bySeverity(inp.judgments.filter((j) => ["confirmed", "waived"].includes(state(inp, j))));
+
+function judgmentSection(inp: RunInputs): string | null {
+  const js = acceptedJudgments(inp);
+  if (js.length === 0) return null;
+  const rows = js.map((j) => [j.id, j.severity, esc(state(inp, j)), esc(j.category), code(loc(j)), esc(j.message)]);
+  return [
+    "These findings come from consultant review assisted by an AI model, not from a tool. Each was proposed with a file and line reference, checked against the reviewed commit, and confirmed by the consultant. Their severity comes from the rubric (or a recorded consultant decision), never from the model. They are not part of the remediation plan's re-runnable checks.",
+    "",
+    table(["ID", "Severity", "State", "Category", "Location", "Finding"], rows, [8, 9, 10, 14, 19, 40]),
+  ].join("\n");
+}
+
 function appendix(inp: RunInputs): string {
-  const rows = bySeverity(inp.findings).map((f) => [f.id, f.severity, esc(state(inp, f)), code(`${f.tool}/${f.rule_id}`), code(loc(f))]);
+  const rows = [...bySeverity(inp.findings), ...acceptedJudgments(inp)].map((f) => [f.id, f.severity, esc(state(inp, f)), code(f.class === "judgment" ? "judgment (AI-assisted)" : `${f.tool}/${f.rule_id}`), code(loc(f))]);
   return rows.length === 0 ? "No findings." : table(["ID", "Severity", "State", "Rule", "Location"], rows, [10, 12, 12, 34, 32]);
 }
 
@@ -197,12 +231,14 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     "",
     "# Executive summary",
     "",
-    keep("executive-summary", "_Write the executive summary here. radr preserves this block when the report is regenerated._"),
+    keep("executive-summary", KEEP_DEFAULTS["executive-summary"]),
   ];
   if (card !== undefined) parts.push("", "# At a glance", "", scorecardSection(card));
   parts.push("", "# Top risks", "", topRisks(inp));
+  const judged = judgmentSection(inp);
   if (!triage) {
     parts.push("", "# Findings", "", findingsByCategory(inp));
+    if (judged !== null) parts.push("", "# Judgment findings", "", judged);
     const cov = coverageSection(inp);
     if (cov !== null) parts.push("", "# Test coverage", "", cov);
     const lic = licenseSection(inp);
@@ -210,8 +246,9 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     const hyg = hygieneSection(inp);
     if (hyg !== null) parts.push("", "# Repository hygiene", "", hyg);
     parts.push("", "# Remediation overview", "", planSummary(waves));
-    parts.push("", "# Recommendations", "", keep("recommendations", "_Consultant recommendations. Preserved across regeneration._"));
+    parts.push("", "# Recommendations", "", keep("recommendations", KEEP_DEFAULTS.recommendations));
   }
+  if (triage && judged !== null) parts.push("", "# Judgment findings", "", judged);
   parts.push("", "# Methodology", "", methodology(inp, l));
   if (!triage) parts.push("", "# Appendix: all findings", "", appendix(inp));
   return `${parts.join("\n")}\n`;
@@ -231,7 +268,7 @@ export function renderRemediation(inp: RunInputs, l: Layout, waves: readonly Pla
     "",
     `Effort sizes: ${stableSort(Object.entries(sizes), ([k]) => k).map(([k, v]) => `**${k}** ${esc(v)}`).join(" · ")}.`,
     "",
-    keep("plan-notes", "_Sequencing notes, owners, and constraints. Preserved across regeneration._"),
+    keep("plan-notes", KEEP_DEFAULTS["plan-notes"]),
   ];
   for (const w of waves) {
     parts.push("", `## Wave ${String(w.wave)}: ${esc(w.label)}`, "");

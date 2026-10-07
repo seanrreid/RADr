@@ -1,7 +1,8 @@
 // Review commands: review, findings, disposition, status.
 
 import { resolveActor } from "../../core/actor.js";
-import { canonicalJson, stableSort } from "../../core/determinism.js";
+import { readFileSync } from "node:fs";
+import { canonicalJson, hashBytes, stableSort } from "../../core/determinism.js";
 import { matchesAny } from "../../core/glob.js";
 import { RefusedError, UsageError } from "../../core/errors.js";
 import { loadEngagement } from "../../engagement/config.js";
@@ -11,7 +12,9 @@ import { readJudgments, runJudgments } from "../../findings/judgments.js";
 import { findingsSetHash, latestRunFindings, readStore } from "../../findings/store.js";
 import { readAnnotations, type Annotation } from "../../llm/triage.js";
 import { SEVERITIES, type Finding } from "../../findings/types.js";
-import { review as runReview } from "../../review/run.js";
+import { assertScope, review as runReview } from "../../review/run.js";
+import { draftKeeps } from "../../llm/draft.js";
+import { Matrix } from "../../matrix/matrix.js";
 import { computeScorecard } from "../../address/scorecard.js";
 import { loadRunInputs } from "../../address/inputs.js";
 import { writeAddress } from "../../address/report.js";
@@ -231,20 +234,32 @@ export const scorecard: CommandSpec = {
 
 export const address: CommandSpec = {
   name: "address",
-  usage: "radr address [-e <id>]",
-  summary: "generate report.md + remediation.md from the latest run",
+  usage: "radr address [-e <id>] [--draft]",
+  summary: "generate report.md + remediation.md; --draft: LLM drafts of untouched prose blocks",
   async run(args, ctx) {
-    const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
+    const { values } = parse(args, { ...ENGAGEMENT_OPTION, draft: { type: "boolean" } }, 0);
     const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+    const log = new EventLog(l.events, ctx.clock);
+    const actor = await resolveActor(ctx.env);
+    // --draft reads the worktree (code-allowed context): the same gate as a lane, checked first.
+    const doc = values.draft === true ? (await assertScope(l, Gates.load(), log)).doc : undefined;
+    if (doc?.llm_policy === "off") throw new RefusedError(`llm_policy is "off" for ${l.id}; --draft needs metadata-only or code-allowed`);
     const inp = loadRunInputs(l, ctx.clock);
     if (inp.runStatus === "aborted") throw new RefusedError(`run ${inp.runId} was aborted; fix it and re-run \`radr review\``);
     const r = writeAddress(inp, l);
-    new EventLog(l.events, ctx.clock).append("report-generated", await resolveActor(ctx.env), {
-      run_id: inp.runId, findings_set_hash: r.setHash, report_hash: r.reportHash, remediation_hash: r.remediationHash,
+    let hashes = { report: r.reportHash, remediation: r.remediationHash };
+    if (doc !== undefined) {
+      const d = await draftKeeps(l, inp, { policy: doc.llm_policy, env: ctx.env, llmDir: l.llm, log, actor, matrix: Matrix.load() });
+      hashes = { report: hashBytes(readFileSync(r.paths.report)), remediation: hashBytes(readFileSync(r.paths.remediation)) };
+      ctx.out(`draft: ${d.status}${d.drafted.length > 0 ? `; drafted ${d.drafted.join(", ")}` : ""}${d.kept.length > 0 ? `; kept your text in ${d.kept.join(", ")}` : ""}${d.rejected.length > 0 ? `; rejected ${d.rejected.join(", ")}` : ""}`);
+      if (d.status === "aborted") throw new RefusedError("drafting aborted: the agent command is missing (see the llm-call event)");
+    }
+    log.append("report-generated", actor, {
+      run_id: inp.runId, findings_set_hash: r.setHash, report_hash: hashes.report, remediation_hash: hashes.remediation,
     });
     ctx.out(`report: ${r.paths.report}`);
     ctx.out(`plan:   ${r.paths.remediation} (${String(r.items)} work items)`);
-    ctx.out(`edit the keep-blocks (executive summary, recommendations, plan notes), then: radr approve report -e ${l.id}`);
+    ctx.out(`edit the keep-blocks (executive summary, recommendations, plan notes${values.draft === true ? "; delete each draft marker once reviewed" : ""}), then: radr approve report -e ${l.id}`);
   },
 };
 
