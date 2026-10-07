@@ -1,6 +1,9 @@
 # RAD Review (`radr`)
 
-**Review, Address, Debug.** Deterministic code-review engagements for consulting.
+**Read, Address, Debug.** Deterministic code-review engagements for consulting.
+
+`radr` is a RAD review: you **Read** the code, **Address** what you found, and **Debug**
+what needs hands-on work.
 
 > RAD ships determinism, not intelligence. Tools decide findings; the model explains them.
 
@@ -14,8 +17,9 @@
 See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
 [M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md).
 
-**Status: M3.** Review and Address work for **TS/JS, Python, Go, Rust, JVM (Java/Kotlin),
-PHP, Ruby, and .NET**:
+**Status: M3 (M4 in progress).** Read and Address work for **TS/JS, Python, Go, Rust,
+JVM (Java/Kotlin), PHP, Ruby, and .NET**:
+
 - the deterministic core
 - static lanes:
   - census, lint, secrets, dependencies + SBOM, history, tests
@@ -29,7 +33,7 @@ PHP, Ruby, and .NET**:
 - rubric v1 with EPSS/KEV promotion, the triage scorecard, and the client report with its
   remediation plan, Gate 2 sign-off, and a branded PDF
 
-Still to come: the LLM lane (M4), Debug (M5), and PR review and verify (M6).
+Still to come: the LLM lane (M4, in progress), Debug (M5), and PR review and verify (M6).
 
 ## Requirements
 
@@ -64,11 +68,15 @@ $EDITOR ~/radr/engagements/acme-health-2026q4/engagement.yml   # review the scop
 radr deps warm                              # sandboxed lanes: build/pull stack images, cache dependencies (network)
 radr scope                                  # pin the warmed cache
 radr approve scope                          # Gate 1: freezes the fingerprint
+
+# Read
 radr review                                 # all lanes; routine findings auto-confirm (rubric v1)
 radr scorecard                              # triage verdict
 radr findings --state pending               # the review set: decisions only you can make
 radr disposition F-0003 confirmed
 radr disposition --lane lint dismissed --reason "generated code"   # bulk, shared reason
+
+# Address
 radr address                                # report.md + remediation.md (edit the keep-blocks)
 radr approve report                         # Gate 2 (or --accept-partial "<reason>")
 radr render                                 # report.pdf + remediation.pdf
@@ -86,6 +94,7 @@ engagement folder.
 and container modes produce identical findings for the same scope (tested end to end).
 
 These lanes are opt-in:
+
 - **`license` and `iac`** need container mode, because ScanCode and Checkov live only in
   the image.
 - **`hygiene`** (OpenSSF Scorecard, offline checks) can be added in either mode. It never
@@ -152,9 +161,10 @@ $RADR_HOME (default ~/radr)
     ├── events.jsonl             append-only, hash-chained authority
     ├── toolchain.lock, snapshots.lock
     ├── source/mirror.git, source/worktree/   radr-owned source snapshot (read-only)
-    ├── raw/<run>/<lane>.attempt-N/           untouched tool output
+    ├── raw/<run>/<lane>.attempt-N/           Read: untouched tool output
     ├── findings.jsonl           normalized findings + per-run sets
     ├── metrics/<run>/<lane>.json  lane metrics (census, history, tests, coverage)
+    ├── llm/                     LLM lane prompts and responses (when llm_policy is not off)
     ├── report/report.md, report.pdf        Address: the client report (Gate 2)
     ├── plan/remediation.md, remediation.pdf
     └── artifacts/               SBOMs and other non-finding outputs
