@@ -4,7 +4,11 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { hashBytes } from "../core/determinism.js";
 import { buildSnapshotsLock, listSnapshots, verifySnapshot, writeSnapshotsLock } from "../toolchain/db.js";
-import { buildLock, doctor, writeLock } from "../toolchain/doctor.js";
+import { buildLock, doctor, writeLock, type ToolchainLock } from "../toolchain/doctor.js";
+import { currentImage } from "../toolchain/image.js";
+import { loadManifest } from "../toolchain/manifest.js";
+import { ESLINT_BASELINE } from "../toolchain/install.js";
+import { readAsset } from "../core/assets.js";
 import { listContext, verifyContext } from "../toolchain/vulnctx.js";
 import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
@@ -104,7 +108,9 @@ async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog, 
   const usesSandbox = doc.lanes.some((x) => SANDBOX_LANES.includes(x)) || (doc.lint_modes ?? []).includes("project");
   if (usesSandbox && runtime === undefined) warnings.push("sandboxed lanes are enabled but no container runtime is reachable (start Podman/Docker, then `radr scope` again)");
   try {
-    const lock = buildLock(await doctor(req.home), usesSandbox ? sandboxLockEntry(runtime) : null);
+    const lock = doc.network.enforcement === "container"
+      ? await containerLock(req.home, runtime, usesSandbox ? sandboxLockEntry(runtime) : null)
+      : buildLock(await doctor(req.home), usesSandbox ? sandboxLockEntry(runtime) : null);
     writeLock(l.toolchainLock, lock);
     log.append("toolchain-locked", req.actor, { lock_hash: hashBytes(readFileSync(l.toolchainLock)), mode: lock.mode });
   } catch (e) {
@@ -161,4 +167,26 @@ export async function approveScope(l: Layout, actor: string, clock: Clock): Prom
   const fingerprint = scopeFingerprint(inputs);
   new EventLog(l.events, clock).append("scope-approved", actor, { fingerprint, sha });
   return { fingerprint, sha };
+}
+
+/**
+ * Container mode lock (M3): the toolchain image built from the CURRENT repo context. Tool
+ * versions come from the manifest the image was built from; the image ID is the drift check.
+ */
+async function containerLock(home: string, runtime: Runtime | undefined, sandbox: ToolchainLock["sandbox"]): Promise<ToolchainLock> {
+  if (runtime === undefined) throw new RefusedError("container mode needs Podman or Docker (start it, then `radr scope` again)");
+  const img = await currentImage(home, runtime);
+  if (img === undefined) throw new RefusedError("no toolchain image for this radr version; run `radr tools build-image`");
+  const tools: Record<string, { version: string; bin_sha256: string }> = {};
+  for (const [name, t] of Object.entries(loadManifest().tools)) tools[name] = { version: t.version, bin_sha256: img.id };
+  return {
+    version: 1, mode: "container", platform: img.platform, tools,
+    node_tools: { lock_sha256: hashBytes(readAsset("toolchain/node-tools/package-lock.json")), eslint_version: "10.12.0" },
+    configs: {
+      eslint_baseline: hashBytes(readAsset(`toolchain/configs/eslint/${ESLINT_BASELINE}`)),
+      ruff_baseline: hashBytes(readAsset("toolchain/configs/ruff/ruff.toml")),
+    },
+    sandbox: sandbox ?? null,
+    image: { tag: img.tag, id: img.id, context_hash: img.contextHash },
+  };
 }

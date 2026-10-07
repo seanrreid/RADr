@@ -93,8 +93,10 @@ export function parseEngagement(text: string, source: string): EngagementDoc {
     const same = doc.lanes.length === TRIAGE_LANES.length && TRIAGE_LANES.every((x) => doc.lanes.includes(x));
     if (!same) throw new UsageError(`${source}: the triage tier runs a fixed lane set: [${TRIAGE_LANES.join(", ")}]`);
   }
-  if (doc.network.enforcement === "container") {
-    throw new UsageError(`${source}: network enforcement "container" requires container mode (M3); use "declared"`);
+  // enforcement "container" = container mode: every static lane runs in the toolchain image with
+  // --network=none. "declared" = host mode. It only makes sense when the scope is offline.
+  if (doc.network.enforcement === "container" && doc.network.mode !== "offline") {
+    throw new UsageError(`${source}: network enforcement "container" requires network mode "offline"`);
   }
   return doc;
 }

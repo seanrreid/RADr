@@ -26,13 +26,15 @@ export interface ToolCheck {
 
 export interface ToolchainLock {
   readonly version: 1;
-  readonly mode: "host";
+  readonly mode: "host" | "container";
   readonly platform: string;
   readonly tools: Readonly<Record<string, { readonly version: string; readonly bin_sha256: string }>>;
   readonly node_tools: { readonly lock_sha256: string; readonly eslint_version: string };
   readonly configs: Readonly<Record<string, string>>;
   /** Container runtime + pinned image refs (M2). null = no runtime: sandboxed lanes unavailable. */
   readonly sandbox?: { readonly runtime: string; readonly version: string; readonly images: Readonly<Record<string, string>> } | null;
+  /** Container mode (M3): the locally built toolchain image every static lane runs in. */
+  readonly image?: { readonly tag: string; readonly id: string; readonly context_hash: string } | null;
 }
 
 /** Verify one manifest tool: receipt present, binary hash matches receipt, binary reports the pinned version. */

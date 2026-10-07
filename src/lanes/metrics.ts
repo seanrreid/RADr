@@ -4,9 +4,9 @@
 
 import { stableSort } from "../core/determinism.js";
 import { matchesAny } from "../core/glob.js";
-import { git } from "../engagement/git.js";
+
 import type { CensusMetrics } from "../normalize/adapters.js";
-import { recordRun, type Lane, type LaneResult } from "./lane.js";
+import { recordRun, toolEnv, type Lane, type LaneResult } from "./lane.js";
 
 const WINDOW_SECONDS = 365 * 24 * 60 * 60;
 const BUS_FACTOR_SHARE_PCT = 50;
@@ -104,7 +104,11 @@ export const history: Lane = {
   id: "history",
   tools: [],
   async run(ctx): Promise<LaneResult> {
-    const r = await git(["log", "--format=%x00%H%x09%ae%x09%ct", "--numstat", "--no-renames", ctx.doc.source.sha, "--"], ctx.layout.mirror);
+    const r = await ctx.tools.exec({
+      command: "git",
+      args: ["-c", "core.fsmonitor=false", "log", "--format=%x00%H%x09%ae%x09%ct", "--numstat", "--no-renames", ctx.doc.source.sha, "--"],
+      cwd: ctx.layout.mirror, env: toolEnv(ctx, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0" }),
+    });
     const toolRun = recordRun(ctx, "history", "git-log", "git-log.txt", r);
     if (r.outcome !== "ok") return { outcome: r.outcome === "tool-missing" ? "tool-missing" : "tool-error", tools: [toolRun], findings: [], detail: r.stderr.toString().trim() };
     try {

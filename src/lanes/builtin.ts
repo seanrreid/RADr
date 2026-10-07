@@ -3,7 +3,7 @@
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { run, type ExecResult } from "../core/exec.js";
+import type { ExecResult } from "../core/exec.js";
 import type { FindingDraft } from "../findings/types.js";
 import { ParseError, eslintAdapter, gitleaksAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../normalize/adapters.js";
 import { ESLINT_BASELINE } from "../toolchain/install.js";
@@ -84,7 +84,7 @@ export const census: Lane = {
   async run(ctx) {
     let metrics: Record<string, unknown> | undefined;
     const s = await step(ctx, "census", "scc", "scc.json",
-      () => run({ command: bin(ctx, "scc"), args: ["--format", "json", "--no-cocomo", "--by-file", "--no-gitignore", "--no-ignore", "."], cwd: ctx.layout.worktree, env: toolEnv(ctx) }),
+      () => ctx.tools.exec({ command: bin(ctx, "scc"), args: ["--format", "json", "--no-cocomo", "--by-file", "--no-gitignore", "--no-ignore", "."], cwd: ctx.layout.worktree, env: toolEnv(ctx) }),
       (raw) => { metrics = sccMetrics(raw); return []; });
     return combine([s], metrics);
   },
@@ -104,7 +104,7 @@ export const lint: Lane = {
       // client's installed plugins, so it runs in the sandbox.
       if (ctx.doc.stacks.includes("python")) {
         steps.push(await step(ctx, "lint", "ruff-project", "ruff-project.json",
-          () => run({ command: bin(ctx, "ruff"), args: ["check", "--output-format", "json", "--no-cache", "--exit-zero", "."], cwd: wt, env: toolEnv(ctx) }),
+          () => ctx.tools.exec({ command: bin(ctx, "ruff"), args: ["check", "--output-format", "json", "--no-cache", "--exit-zero", "."], cwd: wt, env: toolEnv(ctx) }),
           (raw, ref) => ruffAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["ruff"] ?? "", snippet: read }, "project")));
       }
       if (ctx.doc.stacks.includes("typescript-javascript")) steps.push(await eslintProject(ctx));
@@ -113,7 +113,7 @@ export const lint: Lane = {
     if (ctx.doc.stacks.includes("typescript-javascript")) {
       const nt = ctx.tools.nodeTools;
       steps.push(await step(ctx, "lint", "eslint", "eslint.json",
-        () => run({
+        () => ctx.tools.exec({
           command: ctx.tools.node,
           args: [path.join(nt, "node_modules", "eslint", "bin", "eslint.js"), "--config", path.join(nt, ESLINT_BASELINE), "--format", "json",
             "--no-warn-ignored", "--no-error-on-unmatched-pattern", "."],
@@ -123,7 +123,7 @@ export const lint: Lane = {
     }
     if (ctx.doc.stacks.includes("python")) {
       steps.push(await step(ctx, "lint", "ruff", "ruff.json",
-        () => run({
+        () => ctx.tools.exec({
           command: bin(ctx, "ruff"),
           args: ["check", "--config", ctx.tools.ruffConfig, "--output-format", "json", "--no-cache", "--exit-zero", "."],
           cwd: wt, env: toolEnv(ctx),
@@ -142,7 +142,7 @@ export const secrets: Lane = {
     const dir = rawDir(ctx, "secrets");
     const report = path.join(dir, "gitleaks.json");
     const wt = realWorktree(ctx);
-    const r = await run({
+    const r = await ctx.tools.exec({
       command: bin(ctx, "gitleaks"),
       // Triage scans HEAD only (PRD §5); every other tier scans the approved SHA's full history.
       args: ctx.doc.tier === "triage"
@@ -175,7 +175,7 @@ export const sca: Lane = {
     const wt = realWorktree(ctx);
     if (ctx.tools.osvDb === null) return { outcome: "tool-missing", tools: [], findings: [], detail: "no OSV snapshot pinned (snapshots.lock)" };
     const osv = await step(ctx, "sca", "osv-scanner", "osv-scanner.json",
-      () => run({
+      () => ctx.tools.exec({
         command: bin(ctx, "osv-scanner"),
         args: ["scan", "source", "--offline", "--format", "json", "-r", "."],
         cwd: wt, env: toolEnv(ctx, { OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: ctx.tools.osvDb ?? "" }),
@@ -187,7 +187,7 @@ export const sca: Lane = {
     mkdirSync(ctx.layout.artifacts, { recursive: true });
     const sbomPath = path.join(ctx.layout.artifacts, `sbom-${ctx.runId}.spdx.json`);
     const syft = await step(ctx, "sca", "syft", "syft.log",
-      () => run({ command: bin(ctx, "syft"), args: ["scan", "dir:.", "-o", `spdx-json=${sbomPath}`, "-q"], cwd: wt, env: toolEnv(ctx, { SYFT_CHECK_FOR_APP_UPDATE: "false" }) }),
+      () => ctx.tools.exec({ command: bin(ctx, "syft"), args: ["scan", "dir:.", "-o", `spdx-json=${sbomPath}`, "-q"], cwd: wt, env: toolEnv(ctx, { SYFT_CHECK_FOR_APP_UPDATE: "false" }) }),
       () => []);
     return combine([osv, syft]);
   },

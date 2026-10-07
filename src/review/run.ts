@@ -30,6 +30,8 @@ import { buildLock, diffLocks, doctor, readLock, type ToolCheck, type ToolchainL
 import { nodeToolsDir } from "../toolchain/install.js";
 import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
 import { verifyDeps } from "../sandbox/deps.js";
+import { assertSafeImage, containerExec, hostExec, type ContainerMount } from "../toolchain/container.js";
+import { IMAGE_CONFIGS, IMAGE_NODE, IMAGE_NODE_TOOLS, imageBins, imageId } from "../toolchain/image.js";
 import { SANDBOX_LANES } from "../engagement/config.js";
 
 export interface LaneSummary {
@@ -90,25 +92,61 @@ function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: Tool
   return { byTool, lines };
 }
 
-function toolbox(home: string, l: Layout, checks: readonly ToolCheck[], runtime: Runtime | undefined): Toolbox {
+function snapshotsFor(home: string, l: Layout): { osvDb: string | null; depsCache: string | null } {
+  const snaps = readSnapshotsLock(l.snapshotsLock);
+  let osvDb: string | null = null;
+  if (snaps.osv !== null) {
+    verifySnapshot(home, snaps.osv.id);
+    osvDb = path.join(osvRoot(home), snaps.osv.id);
+  }
+  const deps = snaps.deps;
+  return { osvDb, depsCache: deps === undefined || deps === null ? null : verifyDeps(home, l.id, deps.id) };
+}
+
+function hostToolbox(home: string, l: Layout, checks: readonly ToolCheck[], runtime: Runtime | undefined): Toolbox {
   const bins: Record<string, string> = {};
   const versions: Record<string, string> = {};
   for (const c of checks) {
     if (c.binPath !== undefined && c.tool !== "node-tools") bins[c.tool] = c.binPath;
     versions[c.tool] = c.version;
   }
-  const snap = readSnapshotsLock(l.snapshotsLock).osv;
-  let osvDb: string | null = null;
-  if (snap !== null) {
-    verifySnapshot(home, snap.id);
-    osvDb = path.join(osvRoot(home), snap.id);
-  }
-  const deps = readSnapshotsLock(l.snapshotsLock).deps;
-  const depsCache = deps === undefined || deps === null ? null : verifyDeps(home, l.id, deps.id);
+  const { osvDb, depsCache } = snapshotsFor(home, l);
   return {
     bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"),
-    sandbox: runtime === undefined ? null : { runtime, depsCache },
+    exec: hostExec(), sandbox: runtime === undefined ? null : { runtime, depsCache, nodeTools: nodeToolsDir(home) },
   };
+}
+
+/** Container mode (M3, AC2): tools run in the locked image; paths are the image's, mounts same-path. */
+function containerToolbox(home: string, l: Layout, lock: ToolchainLock, runtime: Runtime): Toolbox {
+  const image = lock.image;
+  if (image === undefined || image === null) throw new RefusedError("toolchain.lock has no image (re-scope after `radr tools build-image`)");
+  const platform = lock.platform === "linux-x64" ? "linux-x64" : "linux-arm64";
+  const versions: Record<string, string> = {};
+  for (const [tool, t] of Object.entries(lock.tools)) versions[tool] = t.version;
+  versions["node-tools"] = lock.node_tools.eslint_version;
+  const { osvDb, depsCache } = snapshotsFor(home, l);
+  const mounts: ContainerMount[] = [
+    { path: l.dir, readOnly: false },
+    { path: path.join(l.dir, "source"), readOnly: true },
+    ...(existsSync(path.join(home, "snapshots")) ? [{ path: path.join(home, "snapshots"), readOnly: true }] : []),
+  ];
+  return {
+    bins: imageBins(platform), versions, nodeTools: IMAGE_NODE_TOOLS, node: IMAGE_NODE, osvDb, ruffConfig: `${IMAGE_CONFIGS}/ruff.toml`,
+    exec: containerExec(runtime, assertSafeImage(image.tag), mounts),
+    sandbox: { runtime, depsCache, nodeTools: nodeToolsDir(home) },
+  };
+}
+
+/** Image problems for container mode: missing runtime/image → tool-missing; different image → drift. */
+async function imageProblem(lock: ToolchainLock, runtime: Runtime | undefined): Promise<{ outcome: "tool-missing" | "version-drift"; detail: string } | undefined> {
+  const image = lock.image;
+  if (image === undefined || image === null) return { outcome: "tool-missing", detail: "toolchain.lock has no image" };
+  if (runtime === undefined) return { outcome: "tool-missing", detail: "no container runtime reachable for container mode" };
+  const live = await imageId(runtime, image.tag);
+  if (live === undefined) return { outcome: "tool-missing", detail: `toolchain image ${image.tag} not found (run \`radr tools build-image\`)` };
+  if (live !== image.id) return { outcome: "version-drift", detail: `toolchain image ${image.tag} is ${live}, locked ${image.id}` };
+  return undefined;
 }
 
 export async function review(home: string, l: Layout, actor: string, clock: Clock, env: NodeJS.ProcessEnv = {}): Promise<ReviewResult> {
@@ -118,13 +156,25 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const { doc, fingerprint } = await assertScope(l, gates, log);
   const rubric = loadRubric(doc.rubric);
 
-  const checks = await doctor(home);
-  // Probe for a container runtime only when this scope uses the sandbox (probing can take seconds).
-  const lockedSandbox = readLock(l.toolchainLock).sandbox;
+  const lock = readLock(l.toolchainLock);
+  const containerMode = doc.network.enforcement === "container";
+  // Probe for a container runtime only when this scope needs one (probing can take seconds).
+  const lockedSandbox = lock.sandbox;
   const usesSandbox = (lockedSandbox !== undefined && lockedSandbox !== null) || doc.lanes.some((x) => SANDBOX_LANES.includes(x));
-  const runtime = usesSandbox ? await detectRuntime(env) : undefined;
-  const problems = toolProblems(l, checks, usesSandbox ? sandboxLockEntry(runtime) : null);
-  const tools = toolbox(home, l, checks, runtime);
+  const runtime = usesSandbox || containerMode ? await detectRuntime(env) : undefined;
+  let problems: ToolProblems;
+  let tools: Toolbox;
+  let staticProblem: { outcome: "tool-missing" | "version-drift"; detail: string } | undefined;
+  if (containerMode) {
+    staticProblem = await imageProblem(lock, runtime);
+    const sandboxLines = diffLocks(lock, { ...lock, sandbox: usesSandbox ? sandboxLockEntry(runtime) : null }).filter((x) => x.startsWith("sandbox"));
+    problems = { byTool: new Map(sandboxLines.length > 0 ? [["sandbox", runtime === undefined ? "tool-missing" : "version-drift"] as const] : []), lines: sandboxLines };
+    tools = staticProblem === undefined && runtime !== undefined ? containerToolbox(home, l, lock, runtime) : hostToolbox(home, l, [], runtime);
+  } else {
+    const checks = await doctor(home);
+    problems = toolProblems(l, checks, usesSandbox ? sandboxLockEntry(runtime) : null);
+    tools = hostToolbox(home, l, checks, runtime);
+  }
 
   const runNumber = log.read().filter((e) => e.type === "run-started").length + 1;
   const runId = `R-${String(runNumber).padStart(4, "0")}`;
@@ -150,9 +200,11 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
         throw e;
       }
       log.append("lane-started", actor, { run_id: runId, lane: id, attempt });
-      const problem = lane.tools.map((t) => problems.byTool.get(t)).find((p) => p !== undefined);
+      // In container mode, an image problem affects every static lane; the sandbox has its own checks.
+      const imageIssue = staticProblem !== undefined && !SANDBOX_LANES.includes(id) ? staticProblem : undefined;
+      const problem = imageIssue?.outcome ?? lane.tools.map((t) => problems.byTool.get(t)).find((p) => p !== undefined);
       const result = problem !== undefined
-        ? { outcome: problem, tools: [], findings: [], detail: problems.lines.join("; ") }
+        ? { outcome: problem, tools: [], findings: [], detail: imageIssue?.detail ?? problems.lines.join("; ") }
         : await lane.run({ layout: l, doc, runId, attempt, tools, metrics: laneMetrics });
       const resolved = matrix.resolve(id, result.outcome, attempt);
       const stored = result.metrics !== undefined && resolved.action !== "retry" ? storeMetrics(l, runId, id, result.metrics) : undefined;

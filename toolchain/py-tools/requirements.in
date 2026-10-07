@@ -1,0 +1,4 @@
+# Python tools in the radr toolchain image (M3). Edit, then run scripts/pin-pytools.ts.
+# Licenses: lizard MIT, checkov Apache-2.0.
+lizard==1.24.1
+checkov==3.3.26

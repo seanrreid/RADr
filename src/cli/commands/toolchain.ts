@@ -9,6 +9,7 @@ import { httpFetcher, installNodeTools, installTool } from "../../toolchain/inst
 import { loadManifest } from "../../toolchain/manifest.js";
 import { listContext, syncContext } from "../../toolchain/vulnctx.js";
 import { detectRuntime, pullImages } from "../../sandbox/runtime.js";
+import { buildImage } from "../../toolchain/image.js";
 import { warmDeps } from "../../sandbox/deps.js";
 import { loadEngagement } from "../../engagement/config.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
@@ -16,11 +17,21 @@ import type { CommandSpec } from "../context.js";
 
 export const tools: CommandSpec = {
   name: "tools",
-  usage: "radr tools install [--tool <name>]",
-  summary: "download + checksum-verify the pinned toolchain (network)",
+  usage: "radr tools install [--tool <name>] | radr tools build-image",
+  summary: "install the pinned toolchain, or build the container toolchain image (network)",
   async run(args, ctx) {
     const { values, positionals } = parse(args, { tool: { type: "string" } }, 1);
-    if (positionals[0] !== "install") throw new UsageError(`unknown tools action "${positionals[0] ?? ""}" (expected: install)`);
+    if (positionals[0] === "build-image") {
+      const rt = await detectRuntime(ctx.env);
+      if (rt === undefined) throw new RefusedError("no container runtime reachable (start Podman or Docker)");
+      for (const [image, s] of Object.entries(await pullImages(rt))) ctx.out(`${`image:${image}`.padEnd(12)} ${s} (${rt.name})`);
+      const img = await buildImage(radrHome(ctx.env), rt, ctx.out);
+      ctx.out(`${img.reused ? "up to date" : "built"}: ${img.tag}`);
+      ctx.out(`  id ${img.id}`);
+      ctx.out("use it by setting `network: { mode: offline, enforcement: container }` in engagement.yml, then `radr scope`");
+      return;
+    }
+    if (positionals[0] !== "install") throw new UsageError(`unknown tools action "${positionals[0] ?? ""}" (expected: install, build-image)`);
     const home = radrHome(ctx.env);
     const manifest = loadManifest();
     const names = stableSort(Object.keys(manifest.tools), (n) => n);

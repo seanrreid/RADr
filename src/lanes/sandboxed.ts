@@ -57,7 +57,7 @@ async function inSandbox(ctx: LaneContext, lane: string, stack: Stack, dir: stri
     { host: ctx.layout.worktree, container: "/src", readOnly: true },
     { host: out, container: "/radr/out", readOnly: false },
   ];
-  if (stack === "typescript-javascript") mounts.push({ host: ctx.tools.nodeTools, container: NODE_TOOLS_MOUNT, readOnly: true });
+  if (stack === "typescript-javascript") mounts.push({ host: sb.nodeTools, container: NODE_TOOLS_MOUNT, readOnly: true });
   if (!online && sb.depsCache !== null) mounts.push({ host: sb.depsCache, container: CACHE_MOUNT, readOnly: true });
 
   const r = await runSandbox({

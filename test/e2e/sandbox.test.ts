@@ -11,7 +11,7 @@ import { readFileSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { makeSandboxFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { makeFixtureRepo, makeSandboxFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 import { zipStored } from "../helpers/zip.js";
 import { syncOsv } from "../../src/toolchain/db.js";
@@ -78,5 +78,61 @@ describe("M2 sandbox end-to-end (real runtime)", { skip: ENABLED ? false : "set 
     assert.equal(js.status, "stable");
     assert.equal(py.status, "stable");
     assert.ok(py.line_pct !== null && py.line_pct > 50);
+  });
+});
+
+describe("M3 container toolchain end-to-end (real runtime)", { skip: ENABLED ? false : "set RADR_E2E_TOOLS and RADR_E2E_SANDBOX=1" }, () => {
+  const root = tmpDir("radr-e2e-ctr-");
+  let fixture: FixtureRepo;
+  let home: string;
+  before(async () => {
+    fixture = await makeFixtureRepo(path.join(root, "fork"));
+    home = path.join(root, "home");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(home);
+    symlinkSync(path.join(TOOLS_HOME ?? "", "tools"), path.join(home, "tools"));
+    const osv = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/fixtures/osv");
+    await syncOsv(home, fixedClock("2026-10-01T00:00:00Z"), (url) => Promise.resolve(zipStored(url.includes("/npm/")
+      ? { "GHSA-35jh-r3h4-6jhm.json": readFileSync(path.join(osv, "GHSA-35jh-r3h4-6jhm.json")) }
+      : { "PYSEC-2018-28.json": readFileSync(path.join(osv, "PYSEC-2018-28.json")) })));
+  });
+
+  const radr = async (...args: string[]) => {
+    const env: Record<string, string> = { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" };
+    for (const k of PASS) { const v = process.env[k]; if (v !== undefined) env[k] = v; }
+    const r = await run({ command: process.execPath, args: [bin, ...args], cwd: root, env, timeoutMs: 40 * 60 * 1000, okExitCodes: [0, 1, 2, 3] });
+    assert.equal(r.exitCode, 0, `radr ${args.join(" ")}:\n${r.stdout.toString()}\n${r.stderr.toString()}`);
+    return r.stdout.toString();
+  };
+
+  it("static lanes run in the image with the network denied, and match host mode exactly (AC2, AC3)", async () => {
+    await radr("tools", "build-image");
+    const hashes: string[] = [];
+    for (const [slug, enforcement] of [["host", "declared"], ["ctr", "container"]] as const) {
+      await radr("init", "acme", slug);
+      await radr("scope", "-e", `acme-${slug}`, "--source", fixture.dir);
+      const yml = path.join(home, "engagements", `acme-${slug}`, "engagement.yml");
+      const { writeFileSync } = await import("node:fs");
+      // Static lanes only: the comparison is about the toolchain, not the sandbox.
+      writeFileSync(yml, readFileSync(yml, "utf8").replace("  enforcement: declared", `  enforcement: ${enforcement}`).replace(/\n {2}- types\n {2}- coverage/, ""));
+      await radr("scope", "-e", `acme-${slug}`);
+      await radr("approve", "scope", "-e", `acme-${slug}`);
+      assert.match(await radr("review", "-e", `acme-${slug}`), /run R-0001: complete/);
+      hashes.push((await radr("findings", "-e", `acme-${slug}`, "--hash")).trim());
+    }
+    assert.equal(hashes[0], hashes[1], "host and container modes produce identical findings");
+
+    // Network-denial eval (PRD invariant 9): the same exec path the lanes use cannot reach out.
+    const lock = readFileSync(path.join(home, "engagements", "acme-ctr", "toolchain.lock"), "utf8");
+    const tag = /tag: (localhost\/radr-toolchain:[0-9a-f]{16})/.exec(lock)?.[1] ?? "";
+    const { containerExec } = await import("../../src/toolchain/container.js");
+    const { detectRuntime } = await import("../../src/sandbox/runtime.js");
+    const rt = await detectRuntime(process.env);
+    assert.ok(rt);
+    const r = await containerExec(rt, tag, [{ path: root, readOnly: true }])({
+      command: "python", args: ["-c", "import urllib.request as u; u.urlopen('https://pypi.org', timeout=5); print('REACHED')"], cwd: root,
+    });
+    assert.notEqual(r.outcome, "ok");
+    assert.doesNotMatch(r.stdout.toString(), /REACHED/);
   });
 });
