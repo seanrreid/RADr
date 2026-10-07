@@ -5,6 +5,7 @@ import path from "node:path";
 import { hashBytes } from "../core/determinism.js";
 import { buildSnapshotsLock, listSnapshots, verifySnapshot, writeSnapshotsLock } from "../toolchain/db.js";
 import { buildLock, doctor, writeLock } from "../toolchain/doctor.js";
+import { listContext, verifyContext } from "../toolchain/vulnctx.js";
 import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
 import { EventLog } from "../state/events.js";
@@ -69,7 +70,7 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
         paths: { include: ["**"], exclude: [] },
         stacks: detection.stacks,
         lanes: [...LANES],
-        rubric: "v0",
+        rubric: "v1",
         network: { mode: "offline", enforcement: "declared" },
         llm_policy: "off",
         client_licenses: [],
@@ -108,7 +109,15 @@ async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog):
     rmSync(l.snapshotsLock, { force: true });
     warnings.push("no OSV vulnerability DB snapshot (needed by the sca lane); run `radr db sync`, then `radr scope` again");
   } else {
-    writeSnapshotsLock(l.snapshotsLock, buildSnapshotsLock(needsOsv ? chosen : undefined));
+    // EPSS/KEV are fail-open (P7): pin the newest if present, otherwise warn and pin null.
+    const epss = needsOsv ? listContext(req.home, "epss").at(-1) : undefined;
+    const kev = needsOsv ? listContext(req.home, "kev").at(-1) : undefined;
+    if (epss !== undefined) verifyContext(req.home, "epss", epss.id);
+    if (kev !== undefined) verifyContext(req.home, "kev", kev.id);
+    if (needsOsv && (epss === undefined || kev === undefined)) {
+      warnings.push(`no ${[epss === undefined ? "EPSS" : "", kev === undefined ? "KEV" : ""].filter(Boolean).join("/")} snapshot: severity promotion for exploitability will be skipped (run \`radr db sync\`)`);
+    }
+    writeSnapshotsLock(l.snapshotsLock, buildSnapshotsLock(needsOsv ? chosen : undefined, epss, kev));
   }
   return warnings;
 }

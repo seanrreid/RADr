@@ -2,6 +2,7 @@
 
 import { resolveActor } from "../../core/actor.js";
 import { canonicalJson, stableSort } from "../../core/determinism.js";
+import { matchesAny } from "../../core/glob.js";
 import { RefusedError, UsageError } from "../../core/errors.js";
 import { loadEngagement } from "../../engagement/config.js";
 import { radrHome, resolveEngagement } from "../../engagement/home.js";
@@ -32,6 +33,8 @@ export const review: CommandSpec = {
       if (s.detail !== undefined && s.outcome !== "success") ctx.out(`           ${s.detail}`);
     }
     if (r.setHash !== null) ctx.out(`findings: ${r.findings} present (${r.added} new); set ${r.setHash}`);
+    if ((r.autoConfirmed ?? 0) > 0) ctx.out(`auto-confirmed by rubric: ${r.autoConfirmed ?? 0} (the review set always needs you)`);
+    for (const n of r.notes ?? []) ctx.out(`note: ${n}`);
     if (r.status === "aborted") throw new RefusedError(`run ${r.runId} aborted (see lane outcomes above)`);
   },
 };
@@ -82,22 +85,57 @@ export const findings: CommandSpec = {
 
 export const disposition: CommandSpec = {
   name: "disposition",
-  usage: "radr disposition <F-id> <confirmed|dismissed|waived> [--reason <text>] [-e <id>]",
-  summary: "record a consultant decision on a finding",
+  usage: "radr disposition <F-id> <state> | --rule|--category|--lane|--path <sel> <state> --reason <text> [-e <id>]",
+  summary: "record a consultant decision on one finding, or in bulk",
   async run(args, ctx) {
-    const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, reason: { type: "string" } }, 2);
-    const [id, to] = positionals as [string, string];
+    const { values, positionals } = parse(args, {
+      ...ENGAGEMENT_OPTION, reason: { type: "string" },
+      rule: { type: "string" }, category: { type: "string" }, lane: { type: "string" }, path: { type: "string" },
+    }, [1, 2]);
+    const bulk = values.rule !== undefined || values.category !== undefined || values.lane !== undefined || values.path !== undefined;
+    if (bulk !== (positionals.length === 1)) throw new UsageError("use either `<F-id> <state>` or a selector (--rule/--category/--lane/--path) with `<state>`");
+    const to = positionals.at(-1) ?? "";
     if (!isState(to)) throw new UsageError(`unknown state "${to}"`);
     const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
-    const known = readStore(l.findings).findings.find((f) => f.id === id);
-    if (known === undefined) throw new UsageError(`no finding ${id} in ${l.id}`);
     const log = new EventLog(l.events, ctx.clock);
-    const from = stateOf(dispositions(log.read()), id);
-    checkTransition(from, to, values.reason);
-    log.append("finding-disposition", await resolveActor(ctx.env), {
-      finding_id: id, from, to, ...(values.reason !== undefined ? { reason: values.reason } : {}),
-    });
-    ctx.out(`${id}: ${from} → ${to}`);
+    const states = dispositions(log.read());
+    const actor = await resolveActor(ctx.env);
+    const reason = values.reason;
+
+    if (!bulk) {
+      const id = positionals[0] ?? "";
+      if (readStore(l.findings).findings.find((f) => f.id === id) === undefined) throw new UsageError(`no finding ${id} in ${l.id}`);
+      const from = stateOf(states, id);
+      checkTransition(from, to, reason);
+      log.append("finding-disposition", actor, { finding_id: id, from, to, ...(reason !== undefined ? { reason } : {}) });
+      ctx.out(`${id}: ${from} → ${to}`);
+      return;
+    }
+
+    // Bulk (M2 AC4): one event per finding, all sharing a mandatory reason.
+    if (reason === undefined || reason.trim() === "") throw new RefusedError("bulk disposition requires --reason");
+    const matched = latestRunFindings(l.findings).findings.filter((f) =>
+      (values.rule === undefined || f.rule_id === values.rule) &&
+      (values.category === undefined || f.category === values.category) &&
+      (values.lane === undefined || f.lane === values.lane) &&
+      (values.path === undefined || matchesAny(f.file, [values.path])));
+    if (matched.length === 0) throw new RefusedError("selector matched no findings in the latest run");
+    let applied = 0;
+    const skipped: string[] = [];
+    for (const f of stableSort(matched, (x) => x.id)) {
+      const from = stateOf(states, f.id);
+      try {
+        checkTransition(from, to, reason);
+      } catch (e) {
+        if (!(e instanceof RefusedError)) throw e;
+        skipped.push(`${f.id} (${from})`);
+        continue;
+      }
+      log.append("finding-disposition", actor, { finding_id: f.id, from, to, reason });
+      applied++;
+    }
+    if (applied === 0) throw new RefusedError(`no matched finding can move to ${to}: ${skipped.join(", ")}`);
+    ctx.out(`${applied} finding(s) → ${to}${skipped.length > 0 ? `; skipped ${skipped.length}: ${skipped.join(", ")}` : ""}`);
   },
 };
 

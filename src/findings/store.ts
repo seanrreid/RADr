@@ -8,7 +8,7 @@ import { canonicalJson, hash, hashBytes, normalizeSnippet, stableSort } from "..
 import { RefusedError } from "../core/errors.js";
 import { inScope } from "../core/glob.js";
 import type { EngagementDoc } from "../engagement/config.js";
-import type { Rubric } from "../rubric/rubric.js";
+import { NO_VULN_CONTEXT, type Rubric, type VulnContext } from "../rubric/rubric.js";
 import type { Finding, FindingDraft } from "./types.js";
 
 export interface RunFindings {
@@ -80,7 +80,7 @@ export interface IngestResult {
 }
 
 /** Filter to scope, fingerprint, assign stable ids, apply the rubric, and append to the store. */
-export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: Rubric, drafts: readonly FindingDraft[]): IngestResult {
+export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: Rubric, drafts: readonly FindingDraft[], vulns: VulnContext = NO_VULN_CONTEXT): IngestResult {
   const inScopeDrafts = drafts.filter((d) => inScope(d.file, doc.paths));
   const prints = fingerprintDrafts(inScopeDrafts);
   const store = readStore(file);
@@ -101,7 +101,7 @@ export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: 
       id: `F-${String(nextId++).padStart(ID_WIDTH, "0")}`,
       fingerprint: p.fingerprint,
       class: "tool",
-      severity: rubric.severityOf(p.draft),
+      ...rubric.assess(p.draft, vulns),
       rubric_version: rubric.version,
       snippet_hash: p.snippetHash,
     };

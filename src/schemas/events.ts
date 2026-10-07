@@ -57,7 +57,10 @@ const PAYLOADS = {
     },
     ["run_id", "lane", "attempt", "outcome", "action", "tools"],
   ),
-  "run-completed": obj({ run_id: runId, status: { enum: ["complete", "partial", "aborted"] }, findings_set_hash: sha }, ["run_id", "status"]),
+  "run-completed": obj(
+    { run_id: runId, status: { enum: ["complete", "partial", "aborted"] }, findings_set_hash: sha, notes: { type: "array", items: { type: "string" } }, auto_confirmed: { type: "integer", minimum: 0 } },
+    ["run_id", "status"],
+  ),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: "^F-[0-9]{4,}$" }, from: str, to: str, reason: { type: "string" } },
     ["finding_id", "from", "to"],

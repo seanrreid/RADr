@@ -8,7 +8,7 @@ import type { EngagementDoc } from "../../src/engagement/config.js";
 import { checkTransition } from "../../src/findings/disposition.js";
 import { fingerprintDrafts, findingsSetHash, ingest, latestRunFindings, readStore } from "../../src/findings/store.js";
 import type { FindingDraft } from "../../src/findings/types.js";
-import { cvssTenths, loadRubric } from "../../src/rubric/rubric.js";
+import { NO_VULN_CONTEXT, cvssTenths, loadRubric } from "../../src/rubric/rubric.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const draft = (over: Partial<FindingDraft> = {}): FindingDraft => ({
@@ -39,25 +39,25 @@ describe("glob", () => {
 describe("rubric v0 (AC14)", () => {
   const rubric = loadRubric("v0");
   it("maps every M1 tool severity and CVSS bands", () => {
-    assert.equal(rubric.severityOf(draft()), "low");
-    assert.equal(rubric.severityOf(draft({ tool: "eslint", tool_severity: "1" })), "info");
-    assert.equal(rubric.severityOf(draft({ tool: "gitleaks", tool_severity: "secret" })), "high");
+    assert.equal(rubric.assess(draft(), NO_VULN_CONTEXT).severity, "low");
+    assert.equal(rubric.assess(draft({ tool: "eslint", tool_severity: "1" }), NO_VULN_CONTEXT).severity, "info");
+    assert.equal(rubric.assess(draft({ tool: "gitleaks", tool_severity: "secret" }), NO_VULN_CONTEXT).severity, "high");
     for (const [cvss, sev] of [["9.8", "critical"], ["7.0", "high"], ["6.9", "medium"], ["4.0", "medium"], ["3.9", "low"], ["0.0", "info"], ["10.0", "critical"]] as const) {
-      assert.equal(rubric.severityOf(draft({ tool: "osv-scanner", tool_severity: "cvss", cvss })), sev, cvss);
+      assert.equal(rubric.assess(draft({ tool: "osv-scanner", tool_severity: "cvss", cvss }), NO_VULN_CONTEXT).severity, sev, cvss);
     }
-    assert.equal(rubric.severityOf(draft({ tool: "osv-scanner", tool_severity: "unscored" })), "medium");
+    assert.equal(rubric.assess(draft({ tool: "osv-scanner", tool_severity: "unscored" }), NO_VULN_CONTEXT).severity, "medium");
   });
   it("refuses unmapped pairs instead of defaulting", () => {
-    assert.throws(() => rubric.severityOf(draft({ tool_severity: "warning" })), /no mapping for \(ruff, warning\)/);
-    assert.throws(() => rubric.severityOf(draft({ tool: "mystery" })), RefusedError);
+    assert.throws(() => rubric.assess(draft({ tool_severity: "warning" }), NO_VULN_CONTEXT).severity, /no mapping for \(ruff, warning\)/);
+    assert.throws(() => rubric.assess(draft({ tool: "mystery" }), NO_VULN_CONTEXT).severity, RefusedError);
   });
   it("parses CVSS strictly into tenths", () => {
     assert.equal(cvssTenths("7.2"), 72);
     assert.equal(cvssTenths("10"), 100);
     for (const bad of ["7.25", "-1", "11.0", "high", ""]) assert.throws(() => cvssTenths(bad), RefusedError, bad);
   });
-  it("rejects rubric versions that aren't available yet", () => {
-    assert.throws(() => loadRubric("v1"), /M2/);
+  it("rejects unknown rubric versions", () => {
+    assert.throws(() => loadRubric("v9"), /unknown rubric "v9"/);
   });
 });
 

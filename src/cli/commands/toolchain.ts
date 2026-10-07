@@ -7,6 +7,7 @@ import { listSnapshots, syncOsv, OSV_ECOSYSTEMS } from "../../toolchain/db.js";
 import { buildLock, diffLocks, doctor as runDoctor, readLock } from "../../toolchain/doctor.js";
 import { httpFetcher, installNodeTools, installTool } from "../../toolchain/install.js";
 import { loadManifest } from "../../toolchain/manifest.js";
+import { listContext, syncContext } from "../../toolchain/vulnctx.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CommandSpec } from "../context.js";
 
@@ -52,20 +53,32 @@ export const doctor: CommandSpec = {
 
 export const db: CommandSpec = {
   name: "db",
-  usage: "radr db sync [--ecosystem <name>]... | radr db list",
-  summary: "snapshot OSV vulnerability DBs for offline scans (network)",
+  usage: "radr db sync [--only osv|epss|kev] [--ecosystem <name>]... | radr db list",
+  summary: "snapshot OSV, EPSS, and CISA KEV for offline scans (network)",
   async run(args, ctx) {
-    const { values, positionals } = parse(args, { ecosystem: { type: "string", multiple: true } }, 1);
+    const { values, positionals } = parse(args, { ecosystem: { type: "string", multiple: true }, only: { type: "string" } }, 1);
     const home = radrHome(ctx.env);
     if (positionals[0] === "list") {
       const snaps = listSnapshots(home);
-      if (snaps.length === 0) ctx.out("no snapshots (run `radr db sync`)");
-      for (const s of snaps) ctx.out(`${s.id}  ${s.fetched_at}  ${Object.keys(s.ecosystems).join(", ")}`);
+      for (const s of snaps) ctx.out(`osv   ${s.id}  ${s.fetched_at}  ${Object.keys(s.ecosystems).join(", ")}`);
+      for (const kind of ["epss", "kev"] as const) {
+        for (const s of listContext(home, kind)) ctx.out(`${kind.padEnd(5)} ${s.id}  ${s.fetched_at}  published ${s.published} (${s.rows} rows)`);
+      }
+      if (snaps.length === 0) ctx.out("no OSV snapshots (run `radr db sync`)");
       return;
     }
     if (positionals[0] !== "sync") throw new UsageError(`unknown db action "${positionals[0] ?? ""}" (expected: sync, list)`);
-    const ecosystems = values.ecosystem ?? [...OSV_ECOSYSTEMS];
-    const info = await syncOsv(home, ctx.clock, httpFetcher, ecosystems);
-    ctx.out(`snapshot ${info.id} (${Object.keys(info.ecosystems).join(", ")}); pinned by the next \`radr scope\``);
+    const only = values.only;
+    if (only !== undefined && !["osv", "epss", "kev"].includes(only)) throw new UsageError(`--only must be osv, epss, or kev`);
+    if (only === undefined || only === "osv") {
+      const info = await syncOsv(home, ctx.clock, httpFetcher, values.ecosystem ?? [...OSV_ECOSYSTEMS]);
+      ctx.out(`osv   ${info.id} (${Object.keys(info.ecosystems).join(", ")})`);
+    }
+    for (const kind of ["epss", "kev"] as const) {
+      if (only !== undefined && only !== kind) continue;
+      const s = await syncContext(home, kind, ctx.clock, httpFetcher);
+      ctx.out(`${kind.padEnd(5)} ${s.id} (published ${s.published}, ${s.rows} rows)`);
+    }
+    ctx.out("pinned by the next `radr scope`");
   },
 };

@@ -1,44 +1,41 @@
-# rubric/v1.yml — severity, disposition, scorecard, and effort rules.
-# Status: DRAFT (2026-10-07). See PRD §8 (dispositions), §10 (severity), §5 (triage scorecard).
+# rubric/v1.yml: severity, disposition routing, triage scorecard, and remediation effort.
+# PRD §8 (dispositions), §10 (severity), §5 (triage scorecard), §12 (effort).
 #
-# The rubric is DATA. radr loads it, and its content hash is part of the scope fingerprint.
-# Any change ships as a new version file (v2.yml); a version is never edited after first use.
+# The rubric is DATA. radr loads it (src/rubric/rubric.ts), and its content hash is part of the
+# scope fingerprint. Once an engagement has approved a scope with this version, changes ship
+# as a new file (v2.yml) and this file is never edited.
 #
 # Determinism rules for this file:
-#   - No floats. Percentages are integer percent or basis points (bp: 1% = 100 bp).
-#     CVSS uses tenths (cvss_x10: 9.0 → 90). EPSS uses bp (0.10 → 1000).
-#   - Every lookup is exhaustive. An unmapped (tool, tool_severity) pair is an ERROR, never a default.
-#   - Modifiers apply in the order listed, each moving at most one step, clamped to [info, critical].
+#   - No floats. CVSS is in tenths (9.0 → 90). EPSS is in basis points (0.10 → 1000).
+#     Ratios are integer percent or per-mille, as named.
+#   - Lookups are exhaustive. An unmapped (tool, tool_severity) pair is an ERROR, never a default.
+#   - Severity pipeline, in order: base → rule override → vulnerability promotion →
+#     path modifiers. Each modifier moves at most one step, clamped to [info, critical].
 
 version: 1
-severities: [info, low, medium, high, critical]   # ordered low → high
+severities: [info, low, medium, high, critical]
 
 # Client-facing definitions (rendered in every report's methodology section).
 definitions:
-  critical: "Likely exploitable now with serious impact (data breach, takeover, known-exploited vuln). Fix immediately."
-  high:     "Exploitable or high-impact weakness requiring attention this cycle."
-  medium:   "Real weakness or significant quality risk; schedule remediation."
-  low:      "Minor weakness or quality issue; fix opportunistically."
-  info:     "Observation or metric context; no action required on its own."
+  critical: "Likely exploitable now with serious impact (data breach, takeover, known-exploited vulnerability). Fix immediately."
+  high: "Exploitable or high-impact weakness requiring attention this cycle."
+  medium: "Real weakness or significant quality risk; schedule remediation."
+  low: "Minor weakness or quality issue; fix opportunistically."
+  info: "Observation or metric context; no action required on its own."
 
-# --- 1. Base mapping: (tool, tool_severity) → severity ------------------------------------------
+# --- 1. Base: (tool, tool_severity) → severity | from-cvss -------------------------------------
 base:
-  eslint:      { "2": low, "1": info }                 # eslint JSON: 2=error, 1=warning
-  ruff:        { error: low, warning: info, note: info }
-  gitleaks:    { error: high, warning: high, note: high }   # every secret starts at high (see rule overrides)
-  osv-scanner: { from: cvss }                          # SCA uses section 2, not tool severity
-  opengrep:    { ERROR: high, WARNING: medium, INFO: low }
-  bandit:      { HIGH: high, MEDIUM: medium, LOW: low }
-  gosec:       { HIGH: high, MEDIUM: medium, LOW: low }
-  checkov:     { CRITICAL: critical, HIGH: high, MEDIUM: medium, LOW: low, UNKNOWN: medium }  # OSS checkov often reports no severity → UNKNOWN
-  scancode:    { from: license }                       # section 4
-  # M3 tools (golangci-lint, clippy, PMD, detekt, PHPStan, RuboCop, NetAnalyzers, SpotBugs,
-  # Psalm, hadolint, trivy-config) are added here as their adapters land. The loader fails
-  # closed if an enabled lane uses a tool that has no entry.
+  eslint: { "2": low, "1": info, fatal: low }          # ESLint JSON: 2 = error, 1 = warning
+  ruff: { error: low }                                  # ruff has no severity levels
+  gitleaks: { secret: high }                            # every secret starts high; see overrides
+  osv-scanner: { cvss: from-cvss, unscored: medium }
+  tsc: { error: low }
+  pyright: { error: low, warning: info, information: info }
+  radr-coverage: { build-failed: high, tests-failed: medium, flaky-test: medium }
+  # M3 tools (opengrep, bandit, gosec, checkov, …) are added here as their adapters land.
 
-# Rule-level overrides: exact (tool, rule_id) → severity. Applied before modifiers.
-# Rule IDs must exist in the pinned tool version: at load time, radr checks them against the
-# tool's rule list (e.g., gitleaks' default config), and an unknown ID fails closed.
+# --- 2. Rule overrides: exact (tool, rule_id) → severity, applied after base ---------------------
+# Rule IDs must exist in the pinned tool version; radr checks gitleaks IDs against its rule list.
 rule_overrides:
   gitleaks:
     private-key: critical
@@ -46,93 +43,72 @@ rule_overrides:
     gcp-service-account: critical
     github-pat: critical
     stripe-access-token: critical
-    generic-api-key: medium        # high false-positive rate; stays in the review set regardless
+    generic-api-key: medium          # high false-positive rate; still always in the review set
 
-# --- 2. Vulnerabilities (SCA, and SAST findings carrying a CVE) ---------------------------------
-vulnerabilities:
-  cvss_bands_x10:                   # CVSS v3.1/v4 base score, qualitative scale
-    - { min: 90, severity: critical }
-    - { min: 70, severity: high }
-    - { min: 40, severity: medium }
-    - { min: 1,  severity: low }
-    - { min: 0,  severity: info }
-  no_cvss: medium                   # advisory without a score
-  promote:                          # promotion only, never demotion (conservative, defensible)
-    - { if: kev_listed, to: critical }           # CISA Known Exploited Vulnerabilities (snapshot via `radr db sync`)
-    - { if: epss_bp_gte_1000, steps: 1 }        # EPSS ≥ 10% exploitation probability within 30 days
-  # A finding records which inputs fired (cvss_x10, epss_bp, kev) so the report can explain its severity.
+# --- 3. Vulnerabilities: CVSS bands, then promotion (never demotion) -----------------------------
+cvss_bands_x10:
+  - { min: 90, severity: critical }
+  - { min: 70, severity: high }
+  - { min: 40, severity: medium }
+  - { min: 1, severity: low }
+  - { min: 0, severity: info }
+promote:
+  kev_listed: critical               # CISA Known Exploited Vulnerabilities → critical
+  epss_bp_at_least: 1000             # EPSS ≥ 10% (30-day exploitation probability) → +1 step
 
-# --- 3. Path modifiers ---------------------------------------------------------------------------
+# --- 4. Path modifiers ---------------------------------------------------------------------------
 path_modifiers:
-  demote_one:                       # non-production code
+  demote:                            # non-production code: −1 step
     globs: ["**/test/**", "**/tests/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*",
             "**/fixtures/**", "**/examples/**", "**/docs/**", "**/testdata/**"]
-    applies_to: [quality, maintainability, security, iac]
-    except_lanes: [secrets]         # a real credential in a test file is still a real credential
-  promote_one:
+    categories: [quality, maintainability, security, iac]   # never secrets or dependency
+  promote:                           # sensitive code: +1 step
     globs: ["**/auth/**", "**/authn/**", "**/authz/**", "**/security/**", "**/crypto/**",
             "**/payment*/**", "**/billing/**", "**/admin/**"]
-    applies_to: [security]          # SAST only; quality findings are not promoted by path
+    categories: [security]
 
-# --- 4. License findings -------------------------------------------------------------------------
-license:
-  strong_copyleft_dependency: high      # GPL/AGPL in a dependency of distributed or SaaS software
-  weak_copyleft_dependency: low         # LGPL/MPL/EPL: obligations, rarely blocking
-  non_commercial_or_proprietary: high   # CC-BY-NC, "all rights reserved", custom restrictive
-  unknown_or_missing: medium
-  # In `due-diligence` engagements, strong_copyleft and non_commercial are promoted to critical.
-  engagement_overrides:
-    due-diligence: { strong_copyleft_dependency: critical, non_commercial_or_proprietary: critical }
-
-# --- 5. Metric-derived findings (maint, coverage, tests, history) ---------------------------------
-metric_findings:
-  function_complexity:  { ccn_gt: 25, severity: medium, else_ccn_gt: 15, else_severity: low }
-  file_duplication:     { dup_pct_gt: 30, severity: low }   # per-file; repo-level goes to scorecard
-  build_failed_clean_checkout: high
-  flaky_tests:          medium                               # coverage lane `unstable`
-  history_only_secret:  same_as_secret                      # removed from HEAD ≠ rotated; severity unchanged
-
-# --- 6. Disposition routing (PRD §8) ---------------------------------------------------------------
+# --- 5. Disposition routing (PRD §8) -------------------------------------------------------------
 disposition:
   auto_confirm:
-    lanes: [lint, types, maint, coverage, tests, sca]
-    max_severity: medium            # auto-confirm only BELOW high
-    sca_requires: known_cve         # SCA auto-confirm only when the advisory has a CVE/GHSA ID
-  review_set:                       # always human-dispositioned, at any severity
+    lanes: [lint, types, coverage, sca]
+    max_severity: medium             # auto-confirm only findings at medium or below
+    sca_requires_cve: true           # an SCA finding auto-confirms only with a CVE
+  review_set:                        # always human-dispositioned, whatever the lane rules say
     lanes: [sast, secrets, iac, license]
     classes: [judgment]
-    min_severity_any_lane: high     # anything ≥ high, regardless of lane
+    min_severity: high               # anything ≥ high, in any lane
 
-# --- 7. Triage scorecard (PRD §5) ----------------------------------------------------------------
-# Each metric: green / amber / red thresholds. Verdict rules at the end.
+# --- 6. Triage scorecard (PRD §5) ----------------------------------------------------------------
+# better: lower  → value ≤ green is green; value ≥ red is red; otherwise amber.
+# better: higher → value ≥ green is green; value ≤ red is red; otherwise amber.
+# A metric whose lane didn't run is grey ("unavailable"), never estimated.
 scorecard:
-  lint_errors_per_kloc:        { green_lt: 2,   red_gte: 10 }
-  type_errors:                 { green_lte: 0,  red_gt: 20,  unavailable: grey }
-  duplication_pct:             { green_lt: 3,   red_gt: 8 }
-  complex_functions_pct:       { metric: "share of functions with CCN > 15", green_lt: 5, red_gt: 15 }
-  dependency_vulns:            { green: "no high/critical", amber: "any high", red: "any critical or any KEV-listed" }
-  secrets:                     { green: "none", amber: "history-only", red: "any at HEAD" }
-  test_ratio_pct:              { metric: "test LOC / source LOC × 100", green_gte: 50, red_lt: 20 }
-  bus_factor:                  { metric: "fewest authors covering 50% of commits in last 12 months", green_gte: 3, red_lte: 1 }
-  churn_hotspots:              { metric: "share of churn in files that are also top-decile complexity", green_lt: 20, red_gt: 40 }
+  metrics:
+    lint_errors_per_kloc_x10: { better: lower, green: 19, red: 100, label: "Lint errors per 1,000 lines (×10)" }
+    type_errors: { better: lower, green: 0, red: 21, label: "Type errors" }
+    duplication_pct: { better: lower, green: 2, red: 9, label: "Duplicated code (%)" }
+    complex_functions_pct: { better: lower, green: 4, red: 16, label: "Functions with complexity > 15 (%)" }
+    test_ratio_pct: { better: higher, green: 50, red: 19, label: "Test code vs. source code (%)" }
+    bus_factor: { better: higher, green: 3, red: 1, label: "Bus factor (authors covering 50% of recent commits)" }
+    churn_hotspot_pct: { better: lower, green: 19, red: 41, label: "Churn in complex files (%)" }
+  categorical:
+    dependency_vulns: { label: "Known-vulnerable dependencies", green: none, amber: any-high, red: any-critical-or-kev }
+    secrets: { label: "Secrets in code or history", green: none, amber: history-only, red: present-at-head }
   verdict:
-    at_risk:          "any red in [secrets, dependency_vulns], OR ≥ 3 reds"
-    needs_attention:  "any red, OR ≥ 3 ambers"
-    healthy:          "otherwise"
-  # Thresholds are first-pass judgment calls. Calibrate after the first 3 engagements (new version).
+    at_risk: { red_in: [secrets, dependency_vulns], reds_at_least: 3 }
+    needs_attention: { reds_at_least: 1, ambers_at_least: 3 }
+    # otherwise: healthy. Thresholds are first-pass; calibrate after 3 engagements (as v2).
 
-# --- 8. Remediation effort sizing (PRD §12) ------------------------------------------------------
+# --- 7. Remediation effort (PRD §12) -------------------------------------------------------------
 effort:
   sizes: { S: "< 1 day", M: "1–5 days", L: "> 1 week" }
-  defaults:                         # per remediation item, by dominant finding type
-    dependency_upgrade_patch_minor: S
-    dependency_upgrade_major: M
-    secret_rotation: S              # per credential; history rewrite is optional and separate
-    sast_single_site: S
-    sast_pattern_across_codebase: M
-    lint_bulk_autofix: S
-    complexity_refactor: M
-    authz_model_gap: L
-    build_reproducibility: M
-    test_coverage_gap_module: M
-  # The consultant may override per item in the plan; overrides are recorded as events.
+  by_kind:
+    dependency-upgrade: S
+    secret-rotation: S
+    lint-cleanup: S
+    type-errors: M
+    sast-fix: S
+    build-reproducibility: M
+    test-coverage: M
+    flaky-tests: M
+  # Consultant overrides per plan item are recorded as events.

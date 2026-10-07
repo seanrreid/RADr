@@ -16,7 +16,11 @@ import type { FindingDraft } from "../findings/types.js";
 import { LANES } from "../lanes/builtin.js";
 import type { LaneOutcome, Toolbox } from "../lanes/lane.js";
 import { Matrix, runStatus } from "../matrix/matrix.js";
-import { loadRubric } from "../rubric/rubric.js";
+import { autoConfirms, loadRubric, type Rubric } from "../rubric/rubric.js";
+import { dispositions, stateOf } from "../findings/disposition.js";
+import type { Finding } from "../findings/types.js";
+import { stableSort } from "../core/determinism.js";
+import { loadVulnContext } from "../toolchain/vulnctx.js";
 import { EventLog } from "../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
 import { Gates } from "../state/gates.js";
@@ -41,6 +45,9 @@ export interface ReviewResult {
   readonly added: number;
   readonly setHash: string | null;
   readonly census?: Readonly<Record<string, unknown>>;
+  readonly autoConfirmed?: number;
+  /** Fail-open gaps (P7), e.g. no EPSS/KEV snapshot pinned. */
+  readonly notes?: readonly string[];
 }
 
 /** Throws RefusedError unless the scope gate is open for the CURRENT scope and worktree. */
@@ -159,13 +166,40 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     return { runId, status, lanes: summaries, findings: 0, added: 0, setHash: null, ...(census !== undefined ? { census } : {}) };
   }
   let ingested;
+  let notes: string[] = [];
   try {
-    ingested = ingest(l.findings, runId, doc, rubric, drafts);
+    const pinned = readSnapshotsLock(l.snapshotsLock);
+    const vulns = loadVulnContext(home, { epss: pinned.epss, kev: pinned.kev });
+    if (drafts.some((d) => d.cve !== null)) notes = vulns.gaps;
+    ingested = ingest(l.findings, runId, doc, rubric, drafts, vulns.ctx);
   } catch (e) {
     // e.g. the rubric refuses an unmapped (tool, severity): the run must still be closed, as aborted.
     log.append("run-completed", actor, { run_id: runId, status: "aborted" });
     throw e;
   }
-  log.append("run-completed", actor, { run_id: runId, status, findings_set_hash: ingested.setHash });
-  return { runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash, ...(census !== undefined ? { census } : {}) };
+  const autoConfirmed = applyAutoConfirm(log, rubric, ingested.present);
+  log.append("run-completed", actor, {
+    run_id: runId, status, findings_set_hash: ingested.setHash, auto_confirmed: autoConfirmed,
+    ...(notes.length > 0 ? { notes } : {}),
+  });
+  return {
+    runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash,
+    autoConfirmed, notes, ...(census !== undefined ? { census } : {}),
+  };
+}
+
+/**
+ * Rubric routing (PRD §8, M2 AC3): pending findings in the auto-confirm classes move to
+ * `confirmed` with actor `rubric@<version>`. The review set never auto-confirms.
+ */
+function applyAutoConfirm(log: EventLog, rubric: Rubric, present: readonly Finding[]): number {
+  if (rubric.routing === undefined) return 0;
+  const states = dispositions(log.read());
+  let n = 0;
+  for (const f of stableSort(present, (x) => x.id)) {
+    if (stateOf(states, f.id) !== "pending" || !autoConfirms(rubric.routing, f)) continue;
+    log.append("finding-disposition", `rubric@${rubric.version}`, { finding_id: f.id, from: "pending", to: "confirmed", reason: `auto-confirm (rubric ${rubric.version} §5)` });
+    n++;
+  }
+  return n;
 }

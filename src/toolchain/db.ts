@@ -15,6 +15,7 @@ import { canonicalJson, hash, hashBytes, stableSort } from "../core/determinism.
 import { RefusedError } from "../core/errors.js";
 import { parseYaml } from "../core/yaml.js";
 import type { Fetcher } from "./install.js";
+import type { ContextSnapshot } from "./vulnctx.js";
 
 export const OSV_ECOSYSTEMS = ["npm", "PyPI"] as const;
 /** osv-scanner v2 reads $OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY/osv-scalibr/<ecosystem>/all.zip. */
@@ -81,13 +82,23 @@ export function verifySnapshot(home: string, id: string): SnapshotInfo {
 export interface SnapshotsLock {
   readonly version: 1;
   readonly osv: { readonly id: string; readonly fetched_at: string; readonly ecosystems: Readonly<Record<string, string>> } | null;
+  /** EPSS / KEV (M2). Absent in M1-era locks; null = not pinned (fail-open, no promotion). */
+  readonly epss?: { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string } | null;
+  readonly kev?: { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string } | null;
 }
 
-export function buildSnapshotsLock(info: SnapshotInfo | undefined): SnapshotsLock {
-  if (info === undefined) return { version: 1, osv: null };
-  const ecosystems: Record<string, string> = {};
-  for (const [eco, e] of Object.entries(info.ecosystems)) ecosystems[eco] = e.sha256;
-  return { version: 1, osv: { id: info.id, fetched_at: info.fetched_at, ecosystems } };
+type PinnedContextSnap = { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string };
+
+export function buildSnapshotsLock(info: SnapshotInfo | undefined, epss?: ContextSnapshot, kev?: ContextSnapshot): SnapshotsLock {
+  const pin = (s: ContextSnapshot | undefined): PinnedContextSnap | null =>
+    s === undefined ? null : { id: s.id, fetched_at: s.fetched_at, sha256: s.sha256, published: s.published };
+  let osv: SnapshotsLock["osv"] = null;
+  if (info !== undefined) {
+    const ecosystems: Record<string, string> = {};
+    for (const [eco, e] of Object.entries(info.ecosystems)) ecosystems[eco] = e.sha256;
+    osv = { id: info.id, fetched_at: info.fetched_at, ecosystems };
+  }
+  return { version: 1, osv, epss: pin(epss), kev: pin(kev) };
 }
 
 export function writeSnapshotsLock(file: string, lock: SnapshotsLock): void {

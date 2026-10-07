@@ -40,5 +40,8 @@ export interface Finding extends FindingDraft {
   readonly class: "tool" | "judgment";
   readonly severity: Severity;
   readonly rubric_version: string;
+  /** EPSS (basis points) and CISA KEV status at assessment time; null = unknown / no snapshot. */
+  readonly epss_bp: number | null;
+  readonly kev: boolean | null;
   readonly snippet_hash: string | null;
 }
