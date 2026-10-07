@@ -12,3 +12,10 @@ gates:
     eventType: scope-approved
     condition: latest-fingerprint-equals
     reason: "needs a scope-approved event whose fingerprint matches the current scope (run `radr approve scope`)"
+  report:
+    # Gate 2 (PRD §7): `radr render` requires the latest report-approved event's frozen hashes
+    # (findings set, report.md, remediation.md, theme) to equal the CURRENT ones. Any edit after
+    # approval closes the gate until `radr approve report` is run again.
+    eventType: report-approved
+    condition: report-hashes-equal
+    reason: "needs a report-approved event matching the current report, plan, findings, and theme (run `radr approve report`)"

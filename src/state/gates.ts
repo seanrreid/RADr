@@ -9,7 +9,7 @@ import type { Event } from "./events.js";
 
 interface GateRule {
   readonly eventType: EventType;
-  readonly condition: "latest-fingerprint-equals";
+  readonly condition: "latest-fingerprint-equals" | "report-hashes-equal";
   readonly reason: string;
 }
 
@@ -33,7 +33,7 @@ const validateDoc = makeValidator<GatesDoc>(
           required: ["eventType", "condition", "reason"],
           properties: {
             eventType: { enum: EVENT_TYPES },
-            condition: { enum: ["latest-fingerprint-equals"] },
+            condition: { enum: ["latest-fingerprint-equals", "report-hashes-equal"] },
             reason: { type: "string", minLength: 1 },
           },
         },
@@ -44,8 +44,10 @@ const validateDoc = makeValidator<GatesDoc>(
 );
 
 export interface GateContext {
-  /** Fingerprint of the current scope, computed fresh by the caller. */
-  readonly fingerprint: string;
+  /** Fingerprint of the current scope, computed fresh by the caller (latest-fingerprint-equals). */
+  readonly fingerprint?: string;
+  /** Current hashes keyed like the approval event fields (report-hashes-equal). */
+  readonly hashes?: Readonly<Record<string, string>>;
 }
 
 export interface GateResult {
@@ -72,12 +74,20 @@ export class Gates {
     if (rule === undefined) throw new InternalError(`unknown gate "${name}"`);
     const latest = events.findLast((e) => e.type === rule.eventType);
     if (latest === undefined) return { gate: name, passed: false, reason: rule.reason };
+    if (rule.condition === "report-hashes-equal") {
+      const hashes = ctx.hashes ?? {};
+      const changed = Object.keys(hashes).sort().filter((k) => latest.data[k] !== hashes[k]);
+      if (Object.keys(hashes).length === 0 || changed.length > 0) {
+        return { gate: name, passed: false, reason: `changed since approval: ${changed.join(", ") || "(no hashes given)"}; ${rule.reason}`, event: latest };
+      }
+      return { gate: name, passed: true, reason: "ok", event: latest };
+    }
     const approved = latest.data["fingerprint"];
-    if (approved !== ctx.fingerprint) {
+    if (ctx.fingerprint === undefined || approved !== ctx.fingerprint) {
       return {
         gate: name,
         passed: false,
-        reason: `scope changed since approval (approved ${String(approved)}, current ${ctx.fingerprint}); ${rule.reason}`,
+        reason: `scope changed since approval (approved ${String(approved)}, current ${ctx.fingerprint ?? "?"}); ${rule.reason}`,
         event: latest,
       };
     }

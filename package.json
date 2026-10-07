@@ -17,6 +17,7 @@
     "policy",
     "rubric",
     "rules",
+    "themes",
     "toolchain"
   ],
   "scripts": {

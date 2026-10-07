@@ -12,6 +12,7 @@ import { SEVERITIES, type Finding } from "../../findings/types.js";
 import { review as runReview } from "../../review/run.js";
 import { computeScorecard } from "../../address/scorecard.js";
 import { loadRunInputs } from "../../address/inputs.js";
+import { writeAddress } from "../../address/report.js";
 import { EventLog } from "../../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../../state/fingerprint.js";
 import { Gates } from "../../state/gates.js";
@@ -195,5 +196,24 @@ export const scorecard: CommandSpec = {
     }
     ctx.out(`scorecard ${l.id} (run ${inp.runId}): ${card.verdict.toUpperCase()}`);
     for (const r of card.rows) ctx.out(`  ${r.rating.padEnd(6)} ${r.label.padEnd(54)} ${r.value === null ? "unavailable" : String(r.value)}`);
+  },
+};
+
+export const address: CommandSpec = {
+  name: "address",
+  usage: "radr address [-e <id>]",
+  summary: "generate report.md + remediation.md from the latest run",
+  async run(args, ctx) {
+    const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
+    const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+    const inp = loadRunInputs(l, ctx.clock);
+    if (inp.runStatus === "aborted") throw new RefusedError(`run ${inp.runId} was aborted; fix it and re-run \`radr review\``);
+    const r = writeAddress(inp, l);
+    new EventLog(l.events, ctx.clock).append("report-generated", await resolveActor(ctx.env), {
+      run_id: inp.runId, findings_set_hash: r.setHash, report_hash: r.reportHash, remediation_hash: r.remediationHash,
+    });
+    ctx.out(`report: ${r.paths.report}`);
+    ctx.out(`plan:   ${r.paths.remediation} (${String(r.items)} work items)`);
+    ctx.out(`edit the keep-blocks (executive summary, recommendations, plan notes), then: radr approve report -e ${l.id}`);
   },
 };

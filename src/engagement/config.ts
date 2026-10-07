@@ -36,6 +36,8 @@ export interface EngagementDoc {
   readonly build?: BuildRecipe;
   /** Lint modes: baseline (radr configs, no deps) and/or project (client configs; eslint needs the sandbox). */
   readonly lint_modes?: readonly ("baseline" | "project")[];
+  /** Report theme directory under themes/ (PRD §12). Default: torchcodelab. */
+  readonly theme?: string;
 }
 
 const strArray = { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } as const;
@@ -76,6 +78,7 @@ const validate = makeValidator<EngagementDoc>(
       client_licenses: strArray,
       build: RECIPE_SCHEMA,
       lint_modes: { type: "array", items: { enum: ["baseline", "project"] }, uniqueItems: true, minItems: 1 },
+      theme: { type: "string", pattern: SLUG },
     },
   },
   UsageError,

@@ -2,6 +2,7 @@
 // run, gathered in one place so every view is derived from the same snapshot of state.
 
 import type { Clock } from "../core/clock.js";
+import { hash, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import { loadEngagement, type EngagementDoc } from "../engagement/config.js";
 import type { Layout } from "../engagement/home.js";
@@ -47,4 +48,9 @@ export function loadRunInputs(l: Layout, clock: Clock): RunInputs {
     findings: runStatus === "aborted" ? [] : findings,
     states: dispositions(events), metrics: readRunMetrics(l, runId), lanes, lanesRun: new Set(lanes.keys()), notes, events,
   };
+}
+
+/** Hash of every present finding's current disposition: a report is only valid for these states. */
+export function dispositionsHash(inp: RunInputs): string {
+  return hash(stableSort(inp.findings, (f) => f.id).map((f) => [f.id, inp.states.get(f.id) ?? "pending"]));
 }

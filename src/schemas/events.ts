@@ -29,7 +29,11 @@ const obj = (properties: Record<string, unknown>, required: string[] = Object.ke
   properties,
 });
 
-/** Payload schema per event type. Adding an event type means adding it here. */
+/**
+ * Payload schema per event type. Adding an event type means adding it here.
+ * EVOLUTION RULE: the log is append-only and must stay readable forever, so schema changes are
+ * ADDITIVE ONLY: new fields are optional, existing fields never change type or become required.
+ */
 const PAYLOADS = {
   "engagement-created": obj({ client: { type: "string", pattern: SLUG }, slug: { type: "string", pattern: SLUG }, salt_hash: sha }),
   "source-mirrored": obj({ source: str, refs_hash: sha }),
@@ -62,6 +66,12 @@ const PAYLOADS = {
   "run-completed": obj(
     { run_id: runId, status: { enum: ["complete", "partial", "aborted"] }, findings_set_hash: sha, notes: { type: "array", items: { type: "string" } }, auto_confirmed: { type: "integer", minimum: 0 } },
     ["run_id", "status"],
+  ),
+  "report-generated": obj({ run_id: runId, findings_set_hash: sha, report_hash: sha, remediation_hash: sha }),
+  "report-approved": obj(
+    { run_id: runId, findings_set_hash: sha, dispositions_hash: sha, report_hash: sha, remediation_hash: sha, theme: { type: "string", pattern: SLUG }, theme_hash: sha, accepted_partial: str },
+    // dispositions_hash is NOT required: it was added after the first approvals were recorded.
+    ["run_id", "findings_set_hash", "report_hash", "remediation_hash", "theme", "theme_hash"],
   ),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: "^F-[0-9]{4,}$" }, from: str, to: str, reason: { type: "string" } },
