@@ -54,5 +54,24 @@ export default tseslint.config(
     ignores: ["test/fixtures/lint/**"],
     rules: { "no-restricted-syntax": ["error", ...localeAndHashBans, ...clockBans] },
   },
+  {
+    // The LLM lane proposes; it never decides (PRD §9, M4 AC6, invariant 5). Code under src/llm
+    // may not import the modules that write findings, dispositions, severities, or gates, and
+    // may not append a decision event. Type-only imports are fine.
+    files: ["src/llm/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...localeAndHashBans, jsonStringifyBan, ...clockBans, {
+        selector: "CallExpression[callee.property.name='append'][arguments.0.value=/^(finding-disposition|severity-override|scope-approved|report-approved)$/]",
+        message: "The LLM lane never records a decision (disposition, severity, or gate approval).",
+      }],
+      "@typescript-eslint/no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["**/findings/disposition.js", "**/findings/store.js", "**/rubric/rubric.js", "**/address/gate2.js", "**/state/gates.js"],
+          allowTypeImports: true,
+          message: "The LLM lane may not write findings, dispositions, severities, or gates (invariant 5).",
+        }],
+      }],
+    },
+  },
   { files: ["eslint.config.js", "bin/*.js"], ...tseslint.configs.disableTypeChecked },
 );

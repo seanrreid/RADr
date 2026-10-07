@@ -135,6 +135,10 @@ describe("radr review", () => {
     assert.equal((await radr("review", "-e", "acme-audit")).code, 0);
     await radr("findings", "-e", "acme-audit");
     await radr("status", "-e", "acme-audit");
+    // M4: the LLM entry points refuse under policy off, before anything is spawned.
+    assert.equal((await radr("triage", "-e", "acme-audit")).code, 1);
+    assert.equal((await radr("address", "--draft", "-e", "acme-audit")).code, 1);
+    await radr("address", "-e", "acme-audit");
     assert.equal(existsSync(sentinel), false, "the agent command must never run when llm_policy is off");
   });
 });

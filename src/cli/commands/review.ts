@@ -14,6 +14,7 @@ import { readAnnotations, type Annotation } from "../../llm/triage.js";
 import { SEVERITIES, type Finding } from "../../findings/types.js";
 import { assertScope, review as runReview } from "../../review/run.js";
 import { draftKeeps } from "../../llm/draft.js";
+import { llmMetrics } from "../../state/llm-metrics.js";
 import { Matrix } from "../../matrix/matrix.js";
 import { computeScorecard } from "../../address/scorecard.js";
 import { loadRunInputs } from "../../address/inputs.js";
@@ -209,6 +210,10 @@ export const status: CommandSpec = {
     if (judged.length > 0) {
       const jStates = ["proposed", "pending", "confirmed", "dismissed", "waived"].map((s) => `${s}=${judged.filter((j) => stateOf(states, j.id) === s).length}`).join(" ");
       ctx.out(`  judgment ${judged.length}: ${jStates}`);
+    }
+    const m = llmMetrics(events);
+    if (m.calls > 0) {
+      ctx.out(`  llm:     ${String(m.calls)} call(s), ${String(m.succeeded)} valid, ${String(m.failProtocol)} fail-protocol; judgments proposed ${String(m.judgmentsProposed)}, kept ${String(m.judgmentsKept)}, dismissed ${String(m.judgmentsDismissed)}`);
     }
   },
 };
