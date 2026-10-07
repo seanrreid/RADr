@@ -1,0 +1,14 @@
+# policy/gates.yml: gate rules. src/state/gates.ts evaluates these deterministically by folding
+# the event log; it contains no gate policy of its own.
+#
+# condition:
+#   latest-fingerprint-equals : the most recent `eventType` event's data.fingerprint must equal
+#                               the fingerprint computed from the CURRENT scope. Any scope change
+#                               (PRD §7 Gate 1 list) changes the fingerprint and closes the gate.
+
+version: 1
+gates:
+  scope:
+    eventType: scope-approved
+    condition: latest-fingerprint-equals
+    reason: "needs a scope-approved event whose fingerprint matches the current scope (run `radr approve scope`)"

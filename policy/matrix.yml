@@ -1,0 +1,59 @@
+# policy/matrix.yml: the outcome matrix (PRD P5). The ONLY place a "what happens next" decision
+# lives. src/matrix/matrix.ts loads and looks up this table; it carries no policy of its own.
+#
+# Every (lane, outcome) pair must have an entry. There is no default fallthrough: an unknown
+# pair throws (M1 AC6). Adding a lane or an outcome means filling in its whole row or column.
+#
+# Actions:
+#   continue : the lane's result stands; move to the next lane
+#   retry    : run the lane again while attempt < max_attempts, then apply `then`
+#   partial  : keep whatever the lane produced, mark the lane (and so the run) partial; continue.
+#              A partial run blocks Gate 2 unless --accept-partial (PRD Gate 2)
+#   abort    : stop the run now; the run is `aborted` (fail closed)
+#
+# Outcomes:
+#   success       tool(s) ran and exited with an accepted code; output parsed
+#   tool-missing  a required binary is absent (P7: a missing required tool stops the run)
+#   version-drift a tool's version/checksum differs from toolchain.lock
+#   tool-error    a tool exited with an unaccepted code, or failed to spawn
+#   timeout       a tool hit its time limit (a safety net, never a scope bound)
+#   output-cap    a tool exceeded the output cap (killed, never silently truncated)
+#   parse-error   output didn't match its adapter's expected format (raw output is kept)
+
+version: 1
+outcomes: [success, tool-missing, version-drift, tool-error, timeout, output-cap, parse-error]
+actions: [continue, retry, partial, abort]
+
+table:
+  census:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  lint:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  secrets:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  sca:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }

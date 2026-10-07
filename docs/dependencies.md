@@ -11,13 +11,22 @@ rule.
 
 Entries are added in the same commit that adds the dependency to `package.json`.
 
-## Planned
+## Current (2 of 8)
 
-- **ajv**: JSON Schema validation for events, findings, `engagement.yml`, and LLM
-  output (Wave 1). There's no built-in JSON Schema validator.
-- **yaml**: YAML parsing for engagement, rubric, matrix, and manifest files (Wave 1).
-  Node has no YAML parser.
+### ajv
 
-## Current
+- **Version:** 8.20.0 (exact)
+- **Why:** JSON Schema validation for events, findings, `engagement.yml`, policy files,
+  and (M4) LLM output. Node has no JSON Schema validator, and hand-written checks for
+  every record type would be larger and harder to review than declarative schemas.
+- **Transitive:** fast-deep-equal, fast-uri, json-schema-traverse,
+  require-from-string. None has an install script.
+- **Use:** strict mode. No `ajv-formats`: string formats are written as regex patterns.
 
-_None yet._
+### yaml
+
+- **Version:** 2.9.1 (exact)
+- **Why:** parsing `engagement.yml`, `policy/*.yml`, the rubric, rule targets, and the
+  toolchain manifest. Node has no YAML parser.
+- **Transitive:** none.
+- **Use:** YAML 1.2 core schema, unique keys required, aliases rejected.
