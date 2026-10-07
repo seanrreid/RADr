@@ -6,27 +6,33 @@
 //
 // The agent gets no ambient access: no shell, an empty temp cwd, and an environment of PATH,
 // HOME, and only the variables named in RADR_AGENT_ENV.
+//
+// Agent-agnostic wiring: an argv element "{schema}" is replaced by the call's JSON Schema
+// (Claude Code: --json-schema {schema}), and RADR_AGENT_OUTPUT says how to read stdout:
+// "raw" (default, stdout is the JSON document) or "claude-json" (Claude Code's
+// --output-format json envelope: the document is `structured_output`, or `result` as JSON).
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { hash, hashBytes } from "../core/determinism.js";
+import { canonicalJson, hash, hashBytes } from "../core/determinism.js";
 import { RadrError, RefusedError, UsageError } from "../core/errors.js";
 import { run, type ExecResult } from "../core/exec.js";
 import type { EngagementDoc } from "../engagement/config.js";
 import type { Matrix } from "../matrix/matrix.js";
-import type { Validator } from "../schemas/validate.js";
+import { makeValidator, type Validator } from "../schemas/validate.js";
+import type { AnySchema } from "ajv";
 import type { EventLog } from "../state/events.js";
 
 export type LlmPolicy = EngagementDoc["llm_policy"];
 
-export interface AgentRequest<T> {
+export interface AgentRequest {
   /** What the call is for (a slug, recorded in the event): "triage-explain", "draft-summary", … */
   readonly purpose: string;
   /** The full prompt, already filtered for the policy (W1). Sent on stdin, persisted verbatim. */
   readonly prompt: string;
-  /** Validates the parsed response; any throw is a `fail-protocol` outcome. */
-  readonly validate: Validator<T>;
+  /** The response's JSON Schema: sent to the agent via {schema}, and enforced here. */
+  readonly schema: AnySchema;
 }
 
 export interface AgentContext {
@@ -63,13 +69,46 @@ export function parseAgentCmd(env: NodeJS.ProcessEnv): string[] | null {
     } catch {
       throw new UsageError("RADR_AGENT_CMD: not valid JSON (expected an argv array, e.g. [\"claude\", \"-p\"])");
     }
-    if (!Array.isArray(argv) || argv.length === 0 || !argv.every((a): a is string => typeof a === "string" && a !== "")) {
-      throw new UsageError("RADR_AGENT_CMD: expected a non-empty JSON array of non-empty strings");
+    // Arguments may be empty (Claude Code's `--tools ""`); the executable may not.
+    if (!Array.isArray(argv) || !argv.every((a): a is string => typeof a === "string") || (argv[0] ?? "") === "") {
+      throw new UsageError("RADR_AGENT_CMD: expected a JSON array of strings whose first element names the executable");
     }
     return argv;
   }
   if (/\s/.test(raw)) throw new UsageError("RADR_AGENT_CMD: no shell is used, so arguments must be a JSON argv array, e.g. [\"claude\", \"-p\"]");
   return [raw];
+}
+
+export type AgentOutput = "raw" | "claude-json";
+
+export function parseAgentOutput(env: NodeJS.ProcessEnv): AgentOutput {
+  const v = env["RADR_AGENT_OUTPUT"] ?? "";
+  if (v === "" || v === "raw") return "raw";
+  if (v === "claude-json") return "claude-json";
+  throw new UsageError(`RADR_AGENT_OUTPUT: "${v}" (expected raw or claude-json)`);
+}
+
+/** The response document inside stdout, per RADR_AGENT_OUTPUT. Throws a string on a bad shape. */
+function unwrap(stdout: string, mode: AgentOutput): unknown {
+  const doc: unknown = JSON.parse(stdout);
+  if (mode === "raw") return doc;
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) throw new Error("claude-json: stdout is not an object");
+  const env = doc as Record<string, unknown>;
+  if (env["is_error"] === true) throw new Error(`claude-json: agent reported an error (${typeof env["subtype"] === "string" ? env["subtype"] : "unknown"})`);
+  if (env["structured_output"] !== undefined) return env["structured_output"];
+  if (typeof env["result"] === "string") return JSON.parse(env["result"]);
+  throw new Error("claude-json: neither structured_output nor result");
+}
+
+const validators = new Map<string, Validator<unknown>>();
+function validatorFor(schema: AnySchema): Validator<unknown> {
+  const key = hash(schema);
+  let v = validators.get(key);
+  if (v === undefined) {
+    v = makeValidator<unknown>(schema, RefusedError);
+    validators.set(key, v);
+  }
+  return v;
 }
 
 /** PATH and HOME, plus the names listed (comma- or space-separated) in RADR_AGENT_ENV. */
@@ -85,7 +124,7 @@ export function agentEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** The exec result (and, on success, the parsed response) as a matrix outcome. */
-function classify<T>(r: ExecResult, validate: Validator<T>): { outcome: string; detail: string; output?: T } {
+function classify<T>(r: ExecResult, validate: Validator<T>, mode: AgentOutput): { outcome: string; detail: string; output?: T } {
   switch (r.outcome) {
     case "ok":
       break;
@@ -100,9 +139,9 @@ function classify<T>(r: ExecResult, validate: Validator<T>): { outcome: string; 
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(r.stdout.toString("utf8"));
-  } catch {
-    return { outcome: "fail-protocol", detail: "response is not JSON" };
+    parsed = unwrap(r.stdout.toString("utf8"), mode);
+  } catch (e) {
+    return { outcome: "fail-protocol", detail: e instanceof SyntaxError ? "response is not JSON" : (e as Error).message };
   }
   try {
     return { outcome: "success", detail: "", output: validate(parsed, "agent response") };
@@ -112,14 +151,17 @@ function classify<T>(r: ExecResult, validate: Validator<T>): { outcome: string; 
   }
 }
 
-export async function invokeAgent<T>(ctx: AgentContext, req: AgentRequest<T>): Promise<AgentResult<T>> {
+export async function invokeAgent<T>(ctx: AgentContext, req: AgentRequest): Promise<AgentResult<T>> {
   if (ctx.policy === "off") {
     throw new RefusedError(`LLM policy is "off" for this engagement; refusing agent call (${req.purpose})`);
   }
   const argv = parseAgentCmd(ctx.env);
   if (argv === null) throw new RefusedError(`RADR_AGENT_CMD is not set; refusing agent call (${req.purpose})`);
-  const [command, ...args] = argv;
+  const schemaText = canonicalJson(req.schema);
+  const [command, ...args] = argv.map((a) => (a === "{schema}" ? schemaText : a));
   if (command === undefined) throw new RefusedError("RADR_AGENT_CMD is empty");
+  const mode = parseAgentOutput(ctx.env);
+  const validate = validatorFor(req.schema) as Validator<T>;
   if (!PURPOSE.test(req.purpose)) throw new RefusedError(`agent call purpose "${req.purpose}" is not a slug`);
   const env = agentEnv(ctx.env);
 
@@ -141,7 +183,7 @@ export async function invokeAgent<T>(ctx: AgentContext, req: AgentRequest<T>): P
     }
     writeFileSync(path.join(ctx.llmDir, `${callId}.response.txt`), r.stdout);
 
-    const c = classify(r, req.validate);
+    const c = classify(r, validate, mode);
     const resolved = ctx.matrix.resolve("llm", c.outcome, attempt);
     const action = c.outcome === "success" ? "continue" : resolved.action;
     ctx.log.append("llm-call", ctx.actor, {

@@ -94,6 +94,29 @@ These lanes are opt-in:
 `radr rules coverage` shows the SAST support bar per stack: every top-10 weakness target
 has a fixture-tested rule. The report's methodology section states the same.
 
+## The LLM lane (optional; M4, in progress)
+
+An engagement's `llm_policy` is `off` (the default), `metadata-only` (rule IDs, paths,
+lines and metrics; no source), or `code-allowed` (the anchored lines ±5). The policy is
+part of the scope fingerprint. The LLM explains and proposes; it never sets severity,
+changes a disposition, or approves a gate.
+
+radr runs one agent command, never through a shell, from an empty temp directory, with
+only `PATH`, `HOME` and the variables you name in `RADR_AGENT_ENV`. Every prompt and
+response is kept under the engagement's `llm/`, and each call is an `llm-call` event.
+For Claude Code (checked against v2.1.293):
+
+```bash
+export RADR_AGENT_CMD='["claude", "-p", "--bare", "--tools", "", "--strict-mcp-config",
+  "--no-session-persistence", "--model", "claude-sonnet-5-5",
+  "--output-format", "json", "--json-schema", "{schema}"]'
+export RADR_AGENT_OUTPUT=claude-json       # read Claude Code's JSON envelope
+export RADR_AGENT_ENV=ANTHROPIC_API_KEY    # --bare authenticates only with an API key
+```
+
+`{schema}` is replaced by each call's response schema; radr validates the response
+against it as well.
+
 ## What radr guarantees
 
 | Guarantee | How it's enforced |

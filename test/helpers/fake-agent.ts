@@ -1,7 +1,7 @@
 // A scripted stand-in for RADR_AGENT_CMD. Run as `node fake-agent.js <dir>`. Each invocation
 // is numbered (1, 2, …) and records what it was given:
 //   <dir>/stdin-<n>  the prompt it read
-//   <dir>/seen-<n>   {"cwd", "cwd_entries", "env_keys"} as JSON
+//   <dir>/seen-<n>   {"argv", "cwd", "cwd_entries", "env_keys"} as JSON (argv after <dir>)
 // and then replays the script for call n:
 //   <dir>/response-<n>  written to stdout verbatim (absent: "{}")
 //   <dir>/exit-<n>      exit code (absent: 0)
@@ -16,7 +16,7 @@ const n = (existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0) + 1;
 writeFileSync(counter, String(n));
 
 writeFileSync(path.join(dir, `stdin-${String(n)}`), readFileSync(0));
-const seen = { cwd: process.cwd(), cwd_entries: readdirSync(process.cwd()).length, env_keys: Object.keys(process.env).sort() };
+const seen = { argv: process.argv.slice(3), cwd: process.cwd(), cwd_entries: readdirSync(process.cwd()).length, env_keys: Object.keys(process.env).sort() };
 writeFileSync(path.join(dir, `seen-${String(n)}`), JSON.stringify(seen));
 
 const response = path.join(dir, `response-${String(n)}`);
