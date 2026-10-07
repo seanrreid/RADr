@@ -30,6 +30,7 @@ export default tseslint.config(
     rules: {
       "no-restricted-syntax": ["error", ...localeAndHashBans, jsonStringifyBan, ...clockBans],
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true }],
       // node:test describe/it return promises the runner tracks itself.
       "@typescript-eslint/no-floating-promises": ["error", {
         allowForKnownSafeCalls: [{ from: "package", package: "node:test", name: ["describe", "it", "test", "suite"] }],

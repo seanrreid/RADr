@@ -1,0 +1,22 @@
+[
+ {
+  "RuleID": "aws-access-token",
+  "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.",
+  "StartLine": 2,
+  "EndLine": 2,
+  "StartColumn": 20,
+  "EndColumn": 39,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "config/deploy.env",
+  "SymlinkFile": "",
+  "Commit": "98f8ed3e3ef3e67a990e53ac3cb526772b79ab73",
+  "Entropy": 4.121928,
+  "Author": "Fixture Author",
+  "Email": "fixture@example.com",
+  "Date": "2026-01-02T10:00:00Z",
+  "Message": "add deploy config",
+  "Tags": [],
+  "Fingerprint": "98f8ed3e3ef3e67a990e53ac3cb526772b79ab73:config/deploy.env:aws-access-token:2"
+ }
+]

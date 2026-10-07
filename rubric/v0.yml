@@ -1,0 +1,19 @@
+# rubric/v0.yml: M1 passthrough rubric (AC14). Maps each (tool, tool_severity) that M1 tools emit
+# to a radr severity. No path modifiers, promotions, or auto-confirm: those arrive with v1 (M2).
+# Exhaustive by design: a pair missing here is an error, never a default.
+#
+# `from-cvss` maps the advisory's CVSS base score through cvss_bands_x10 (score × 10, integers).
+
+version: 0
+base:
+  eslint:      { "2": low, "1": info, fatal: low }
+  ruff:        { error: low }
+  gitleaks:    { secret: high }
+  osv-scanner: { cvss: from-cvss, unscored: medium }
+
+cvss_bands_x10:
+  - { min: 90, severity: critical }
+  - { min: 70, severity: high }
+  - { min: 40, severity: medium }
+  - { min: 1,  severity: low }
+  - { min: 0,  severity: info }

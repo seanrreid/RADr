@@ -23,7 +23,7 @@ const IDENTITY = {
   GIT_CONFIG_GLOBAL: "/dev/null",
 };
 
-const FILES: Record<string, string> = {
+export const FILES: Readonly<Record<string, string>> = {
   "package.json": `{
   "name": "fixture-app",
   "version": "1.0.0",

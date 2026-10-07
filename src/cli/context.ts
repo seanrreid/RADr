@@ -13,5 +13,5 @@ export interface CommandSpec {
   readonly name: string;
   readonly usage: string;
   readonly summary: string;
-  run(args: readonly string[], ctx: CliContext): Promise<void>;
+  run(args: readonly string[], ctx: CliContext): Promise<void> | void;
 }

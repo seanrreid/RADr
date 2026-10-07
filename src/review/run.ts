@@ -1,0 +1,171 @@
+// `radr review` (T4.1): run the approved scope's lanes and ingest findings.
+//
+// Before EVERY lane attempt: the scope gate must be open, the fingerprint must still match, and
+// the worktree must be exactly the approved SHA (AC9). Every lane outcome resolves through
+// policy/matrix.yml; nothing here decides what happens next on its own.
+
+import path from "node:path";
+import type { Clock } from "../core/clock.js";
+import { assetPath } from "../core/assets.js";
+import { RefusedError } from "../core/errors.js";
+import type { EngagementDoc } from "../engagement/config.js";
+import type { Layout } from "../engagement/home.js";
+import { verifyWorktree } from "../engagement/source.js";
+import { ingest } from "../findings/store.js";
+import type { FindingDraft } from "../findings/types.js";
+import { LANES } from "../lanes/builtin.js";
+import type { LaneOutcome, Toolbox } from "../lanes/lane.js";
+import { Matrix, runStatus } from "../matrix/matrix.js";
+import { loadRubric } from "../rubric/rubric.js";
+import { EventLog } from "../state/events.js";
+import { readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
+import { Gates } from "../state/gates.js";
+import { osvRoot, readSnapshotsLock, verifySnapshot } from "../toolchain/db.js";
+import { buildLock, diffLocks, doctor, readLock, type ToolCheck } from "../toolchain/doctor.js";
+import { nodeToolsDir } from "../toolchain/install.js";
+
+export interface LaneSummary {
+  readonly lane: string;
+  readonly outcome: LaneOutcome;
+  readonly action: string;
+  readonly attempts: number;
+  readonly findings: number;
+  readonly detail?: string;
+}
+
+export interface ReviewResult {
+  readonly runId: string;
+  readonly status: "complete" | "partial" | "aborted";
+  readonly lanes: readonly LaneSummary[];
+  readonly findings: number;
+  readonly added: number;
+  readonly setHash: string | null;
+  readonly census?: Readonly<Record<string, unknown>>;
+}
+
+/** Throws RefusedError unless the scope gate is open for the CURRENT scope and worktree. */
+async function assertScope(l: Layout, gates: Gates, log: EventLog): Promise<{ doc: EngagementDoc; fingerprint: string }> {
+  const inputs = readScopeInputs(l);
+  const fingerprint = scopeFingerprint(inputs);
+  const g = gates.evaluate("scope", log.read(), { fingerprint });
+  if (!g.passed) throw new RefusedError(g.reason);
+  await verifyWorktree(l.worktree, inputs.engagement.source.sha);
+  return { doc: inputs.engagement, fingerprint };
+}
+
+interface ToolProblems {
+  /** tool → the lane outcome its problem maps to. */
+  readonly byTool: ReadonlyMap<string, "tool-missing" | "version-drift">;
+  readonly lines: readonly string[];
+}
+
+/** Tools that are missing, or whose live state differs from the engagement's toolchain.lock. */
+function toolProblems(l: Layout, checks: readonly ToolCheck[]): ToolProblems {
+  const byTool = new Map<string, "tool-missing" | "version-drift">();
+  const unhealthy = checks.filter((c) => c.state !== "ok");
+  if (unhealthy.length > 0) {
+    for (const c of unhealthy) byTool.set(c.tool, c.state === "missing" ? "tool-missing" : "version-drift");
+    return { byTool, lines: unhealthy.map((c) => `${c.tool}: ${c.state} (${c.detail})`) };
+  }
+  const lines = diffLocks(readLock(l.toolchainLock), buildLock(checks));
+  for (const line of lines) {
+    const name = line.split(":")[0] ?? "";
+    if (name.startsWith("config ruff")) byTool.set("ruff", "version-drift");
+    else if (name.startsWith("config eslint") || name === "node-tools") byTool.set("node-tools", "version-drift");
+    else if (name === "platform") for (const c of checks) byTool.set(c.tool, "version-drift");
+    else byTool.set(name, "version-drift");
+  }
+  return { byTool, lines };
+}
+
+function toolbox(home: string, l: Layout, checks: readonly ToolCheck[]): Toolbox {
+  const bins: Record<string, string> = {};
+  const versions: Record<string, string> = {};
+  for (const c of checks) {
+    if (c.binPath !== undefined && c.tool !== "node-tools") bins[c.tool] = c.binPath;
+    versions[c.tool] = c.version;
+  }
+  const snap = readSnapshotsLock(l.snapshotsLock).osv;
+  let osvDb: string | null = null;
+  if (snap !== null) {
+    verifySnapshot(home, snap.id);
+    osvDb = path.join(osvRoot(home), snap.id);
+  }
+  return { bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml") };
+}
+
+export async function review(home: string, l: Layout, actor: string, clock: Clock): Promise<ReviewResult> {
+  const log = new EventLog(l.events, clock);
+  const gates = Gates.load();
+  const matrix = Matrix.load();
+  const { doc, fingerprint } = await assertScope(l, gates, log);
+  const rubric = loadRubric(doc.rubric);
+
+  const checks = await doctor(home);
+  const problems = toolProblems(l, checks);
+  const tools = toolbox(home, l, checks);
+
+  const runNumber = log.read().filter((e) => e.type === "run-started").length + 1;
+  const runId = `R-${String(runNumber).padStart(4, "0")}`;
+  const lanes = matrix.lanes.filter((id) => (doc.lanes as readonly string[]).includes(id));
+  log.append("run-started", actor, { run_id: runId, fingerprint, tier: doc.tier, lanes });
+
+  const summaries: LaneSummary[] = [];
+  const drafts: FindingDraft[] = [];
+  const terminal: ("continue" | "partial" | "abort")[] = [];
+  let census: Readonly<Record<string, unknown>> | undefined;
+
+  for (const id of lanes) {
+    const lane = LANES[id];
+    if (lane === undefined) throw new RefusedError(`lane "${id}" is not implemented`);
+    let attempt = 1;
+    for (;;) {
+      try {
+        await assertScope(l, gates, log); // AC9: re-checked before every attempt
+      } catch (e) {
+        // The scope moved under a running review: close the run as aborted, then refuse.
+        log.append("run-completed", actor, { run_id: runId, status: "aborted" });
+        throw e;
+      }
+      log.append("lane-started", actor, { run_id: runId, lane: id, attempt });
+      const problem = lane.tools.map((t) => problems.byTool.get(t)).find((p) => p !== undefined);
+      const result = problem !== undefined
+        ? { outcome: problem, tools: [], findings: [], detail: problems.lines.join("; ") }
+        : await lane.run({ layout: l, doc, runId, attempt, tools });
+      const resolved = matrix.resolve(id, result.outcome, attempt);
+      log.append("lane-completed", actor, {
+        run_id: runId, lane: id, attempt, outcome: result.outcome, action: resolved.action, tools: [...result.tools],
+        ...(result.detail !== undefined ? { detail: result.detail } : {}),
+      });
+      if (resolved.action === "retry") {
+        attempt = resolved.nextAttempt ?? attempt + 1;
+        continue;
+      }
+      terminal.push(resolved.action);
+      if (resolved.action !== "abort") drafts.push(...result.findings);
+      if (id === "census" && result.metrics !== undefined) census = result.metrics;
+      summaries.push({
+        lane: id, outcome: result.outcome, action: resolved.action, attempts: attempt, findings: result.findings.length,
+        ...(result.detail !== undefined ? { detail: result.detail } : {}),
+      });
+      break;
+    }
+    if (terminal.at(-1) === "abort") break;
+  }
+
+  const status = runStatus(terminal);
+  if (status === "aborted") {
+    log.append("run-completed", actor, { run_id: runId, status });
+    return { runId, status, lanes: summaries, findings: 0, added: 0, setHash: null, ...(census !== undefined ? { census } : {}) };
+  }
+  let ingested;
+  try {
+    ingested = ingest(l.findings, runId, doc, rubric, drafts);
+  } catch (e) {
+    // e.g. the rubric refuses an unmapped (tool, severity): the run must still be closed, as aborted.
+    log.append("run-completed", actor, { run_id: runId, status: "aborted" });
+    throw e;
+  }
+  log.append("run-completed", actor, { run_id: runId, status, findings_set_hash: ingested.setHash });
+  return { runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash, ...(census !== undefined ? { census } : {}) };
+}
