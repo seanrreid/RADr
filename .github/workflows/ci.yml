@@ -25,6 +25,10 @@ jobs:
         run: node bin/radr.js tools install
         env:
           RADR_HOME: ${{ runner.temp }}/radr-tools
+      - name: Rule pack (provenance, licenses, unmodified, every rule passes its fixtures)
+        run: OPENGREP="$(ls "$RADR_HOME"/tools/opengrep/*/opengrep_* | head -1)" node dist/scripts/check-rules.js
+        env:
+          RADR_HOME: ${{ runner.temp }}/radr-tools
       - name: Test (unit + real-tools e2e)
         run: node --test "dist/test/**/*.test.js"
         env:

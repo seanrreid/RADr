@@ -1,0 +1,15 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.go.tls-insecure-skip-verify
+  languages: [go]
+  severity: ERROR
+  message: >-
+    TLS certificate verification is disabled (InsecureSkipVerify: true), so any certificate is
+    accepted and connections can be intercepted. Remove it, or pin the expected CA.
+  metadata:
+    cwe: ["CWE-295: Improper Certificate Validation"]
+    owasp: ["A02:2021 - Cryptographic Failures"]
+    source: radr
+  pattern-either:
+  - pattern: "tls.Config{..., InsecureSkipVerify: true, ...}"
+  - pattern: $C.InsecureSkipVerify = true

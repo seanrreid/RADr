@@ -1,0 +1,21 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.csharp.ssrf
+  languages: [csharp]
+  severity: ERROR
+  mode: taint
+  message: >-
+    An outbound HTTP request uses a value from the incoming request, so an attacker can make the
+    server call internal services (SSRF). Validate the destination against an allowlist.
+  metadata:
+    cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+    owasp: ["A10:2021 - Server-Side Request Forgery"]
+    source: radr
+  pattern-sources:
+  - pattern: Request.Query[...]
+  - pattern: Request.Form[...]
+  pattern-sinks:
+  - pattern-either:
+    - pattern: (HttpClient $C).GetAsync(...)
+    - pattern: (HttpClient $C).GetStringAsync(...)
+    - pattern: (HttpClient $C).PostAsync(...)

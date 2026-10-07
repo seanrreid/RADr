@@ -118,6 +118,35 @@ tools:
         sha256: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
         archive: tar.gz
         bin: syft
+  opengrep:
+    version: 1.30.1
+    license: LGPL-2.1
+    source: https://github.com/opengrep/opengrep
+    checksums_from: https://api.github.com/repos/opengrep/opengrep/releases/tags/v1.30.1 (asset digests)
+    version_args:
+      - --version
+    version_pattern: ([0-9]+\.[0-9]+\.[0-9]+)
+    platforms:
+      darwin-arm64:
+        url: https://github.com/opengrep/opengrep/releases/download/v1.30.1/opengrep_osx_arm64
+        sha256: 7b788794e111ce3fb83f0aa52c100a3b85d37d8b59482262109031f50d4a8d91
+        archive: binary
+        bin: opengrep_osx_arm64
+      darwin-x64:
+        url: https://github.com/opengrep/opengrep/releases/download/v1.30.1/opengrep_osx_x86
+        sha256: a8c6d5f51bb38253b48e9a80fca63684aa2a0f9abfeacea27b8d8b5778476bae
+        archive: binary
+        bin: opengrep_osx_x86
+      linux-arm64:
+        url: https://github.com/opengrep/opengrep/releases/download/v1.30.1/opengrep_manylinux_aarch64
+        sha256: a730f6fdce1e978ea29e610a2e0503bfe1ec31fce08979a9a84e3699f03e16ee
+        archive: binary
+        bin: opengrep_manylinux_aarch64
+      linux-x64:
+        url: https://github.com/opengrep/opengrep/releases/download/v1.30.1/opengrep_manylinux_x86
+        sha256: d3195b9d8d5ae93179f6aa5f5daaba6a920a5a09d38c5d5ae5e60924050210c4
+        archive: binary
+        bin: opengrep_manylinux_x86
   pandoc:
     version: "3.12"
     license: GPL-2.0-or-later

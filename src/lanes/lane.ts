@@ -34,6 +34,8 @@ export interface Toolbox {
   readonly osvDb: string | null;
   /** Absolute path of radr's ruff baseline config. */
   readonly ruffConfig: string;
+  /** radr's rules/ directory (pack + lgpl sub-pack); mounted read-only at the same path in container mode. */
+  readonly rulesDir: string;
   /** Runs a tool: on the host, or in the toolchain image with --network=none (container mode). */
   readonly exec: Exec;
   /** Build sandbox (M2): runtime + offline dependency cache. null = no runtime detected. */

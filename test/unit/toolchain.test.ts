@@ -84,7 +84,7 @@ describe("doctor + toolchain.lock (T3.3)", () => {
     const checks = await doctor(home);
     assert.deepEqual(checks.filter((c) => c.state !== "ok"), []);
     assert.deepEqual(buildLock(checks), buildLock(await doctor(home)));
-    assert.deepEqual(Object.keys(buildLock(checks).tools), ["gitleaks", "osv-scanner", "pandoc", "ruff", "scc", "syft", "typst"]);
+    assert.deepEqual(Object.keys(buildLock(checks).tools), ["gitleaks", "opengrep", "osv-scanner", "pandoc", "ruff", "scc", "syft", "typst"]);
   });
 
   it("refuses to build a lock while any tool is missing", async () => {

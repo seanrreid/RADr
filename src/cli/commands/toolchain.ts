@@ -10,6 +10,8 @@ import { loadManifest } from "../../toolchain/manifest.js";
 import { listContext, syncContext } from "../../toolchain/vulnctx.js";
 import { detectRuntime, pullImages } from "../../sandbox/runtime.js";
 import { buildImage } from "../../toolchain/image.js";
+import { ruleCoverage } from "../../rules/pack.js";
+import { canonicalJson } from "../../core/determinism.js";
 import { warmDeps } from "../../sandbox/deps.js";
 import { loadEngagement } from "../../engagement/config.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
@@ -118,5 +120,28 @@ export const db: CommandSpec = {
       ctx.out(`${kind.padEnd(5)} ${s.id} (published ${s.published}, ${s.rows} rows)`);
     }
     ctx.out("pinned by the next `radr scope`");
+  },
+};
+
+export const rules: CommandSpec = {
+  name: "rules",
+  usage: "radr rules coverage [--pack authored|pack|lgpl]... [--json]",
+  summary: "rule-pack support bar per stack (top-10 CWE targets)",
+  run(args, ctx) {
+    const { values, positionals } = parse(args, { pack: { type: "string", multiple: true }, json: { type: "boolean" } }, 1);
+    if (positionals[0] !== "coverage") throw new UsageError(`unknown rules action "${positionals[0] ?? ""}" (expected: coverage)`);
+    const packs = (values.pack ?? ["authored", "pack", "lgpl"]).map((p) => {
+      if (p !== "authored" && p !== "pack" && p !== "lgpl") throw new UsageError(`unknown pack "${p}"`);
+      return p;
+    });
+    const cov = ruleCoverage(packs);
+    if (values.json === true) {
+      ctx.out(canonicalJson(cov.map((c) => ({ ...c }))));
+      return;
+    }
+    ctx.out(`rule packs: ${packs.join(" + ")}`);
+    for (const c of cov) {
+      ctx.out(`  ${c.stack.padEnd(22)} ${(c.supported ? "supported" : "partial").padEnd(10)} ${String(c.covered.length)}/${String(c.covered.length + c.missing.length)} targets, ${String(c.rules)} rules${c.missing.length > 0 ? `; missing CWE-${c.missing.join(", CWE-")}` : ""}`);
+    }
   },
 };

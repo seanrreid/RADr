@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { ExecResult } from "../core/exec.js";
 import type { FindingDraft } from "../findings/types.js";
-import { ParseError, eslintAdapter, gitleaksAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../normalize/adapters.js";
+import { ParseError, eslintAdapter, gitleaksAdapter, opengrepAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../normalize/adapters.js";
 import { ESLINT_BASELINE } from "../toolchain/install.js";
 import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type LaneContext, type LaneOutcome, type LaneResult, type ToolRun } from "./lane.js";
 import { history, tests } from "./metrics.js";
@@ -193,4 +193,26 @@ export const sca: Lane = {
   },
 };
 
-export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca, history, tests, types, coverage };
+
+/** UTF-8 locale for Opengrep: it is a bundled Python app that crashes decoding rules under LC_ALL=C. */
+const OPENGREP_ENV = { LC_ALL: "C.UTF-8", LANG: "C.UTF-8" } as const;
+
+export const sast: Lane = {
+  id: "sast",
+  tools: ["opengrep"],
+  async run(ctx) {
+    const wt = realWorktree(ctx);
+    const packs = ctx.doc.rule_packs ?? ["authored", "pack", "lgpl"];
+    const configs = packs.flatMap((p) => ["--config", path.join(ctx.tools.rulesDir, p)]);
+    const s = await step(ctx, "sast", "opengrep", "opengrep.json",
+      () => ctx.tools.exec({
+        command: bin(ctx, "opengrep"),
+        args: ["scan", "--no-rewrite-rule-ids", ...configs, "--json", "--quiet", "."],
+        cwd: wt, env: toolEnv(ctx, OPENGREP_ENV), okExitCodes: [0, 1], timeoutMs: 30 * 60 * 1000,
+      }),
+      (raw, ref) => opengrepAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["opengrep"] ?? "", snippet: snippetReader(wt) }));
+    return combine([s]);
+  },
+};
+
+export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca, history, tests, types, coverage, sast };

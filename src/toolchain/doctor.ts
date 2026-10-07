@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { stringify } from "yaml";
 import { readAsset } from "../core/assets.js";
+import { rulePackHashes } from "../rules/pack.js";
 import { hashBytes, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import { run } from "../core/exec.js";
@@ -95,6 +96,7 @@ export function buildLock(checks: readonly ToolCheck[], sandbox: ToolchainLock["
     configs: {
       eslint_baseline: hashBytes(readAsset(`toolchain/configs/eslint/${ESLINT_BASELINE}`)),
       ruff_baseline: hashBytes(readAsset("toolchain/configs/ruff/ruff.toml")),
+      ...rulePackHashes(),
     },
     sandbox,
   };

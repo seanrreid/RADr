@@ -11,7 +11,7 @@ import { RECIPE_SCHEMA, type BuildRecipe } from "../sandbox/recipe.js";
 export const ENGAGEMENT_TYPES = ["triage", "quality", "health-audit", "security", "due-diligence", "pr-review", "debug"] as const;
 export const TIERS = ["triage", "standard", "deep", "diff"] as const;
 /** Lanes implemented in M1. Later milestones extend this list (and policy/matrix.yml). */
-export const LANES = ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage"] as const;
+export const LANES = ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage", "sast"] as const;
 /** Lanes that run client code in the build sandbox. */
 export const SANDBOX_LANES: readonly string[] = ["types", "coverage"];
 /** The triage tier runs this fixed set (PRD §5): fast, static, no sandbox. */
@@ -38,6 +38,8 @@ export interface EngagementDoc {
   readonly lint_modes?: readonly ("baseline" | "project")[];
   /** Report theme directory under themes/ (PRD §12). Default: torchcodelab. */
   readonly theme?: string;
+  /** Opengrep rule packs: "authored" (radr's own), "pack" (permissive, vendored), "lgpl" (LGPL-3.0 sub-pack, pending counsel). Default: all three. */
+  readonly rule_packs?: readonly ("authored" | "pack" | "lgpl")[];
 }
 
 const strArray = { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } as const;
@@ -79,6 +81,7 @@ const validate = makeValidator<EngagementDoc>(
       build: RECIPE_SCHEMA,
       lint_modes: { type: "array", items: { enum: ["baseline", "project"] }, uniqueItems: true, minItems: 1 },
       theme: { type: "string", pattern: SLUG },
+      rule_packs: { type: "array", items: { enum: ["authored", "pack", "lgpl"] }, uniqueItems: true, minItems: 1 },
     },
   },
   UsageError,

@@ -1,0 +1,39 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.go.open-redirect
+  languages: [go]
+  severity: WARNING
+  mode: taint
+  message: >-
+    A redirect target comes from the request, so an attacker can send users to any site (open
+    redirect). Redirect only to relative paths or an allowlist of hosts.
+  metadata:
+    cwe: ["CWE-601: URL Redirection to Untrusted Site ('Open Redirect')"]
+    owasp: ["A01:2021 - Broken Access Control"]
+    source: radr
+  pattern-sources:
+  - pattern: $R.FormValue(...)
+  - pattern: $R.URL.Query().Get(...)
+  pattern-sinks:
+  - patterns:
+    - pattern: http.Redirect($W, $R, $URL, ...)
+    - focus-metavariable: $URL
+- id: radr.go.ssrf
+  languages: [go]
+  severity: ERROR
+  mode: taint
+  message: >-
+    An outbound HTTP request uses a URL taken from the incoming request, so an attacker can make
+    the server call internal services (SSRF). Validate the destination against an allowlist.
+  metadata:
+    cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+    owasp: ["A10:2021 - Server-Side Request Forgery"]
+    source: radr
+  pattern-sources:
+  - pattern: $R.FormValue(...)
+  - pattern: $R.URL.Query().Get(...)
+  pattern-sinks:
+  - pattern-either:
+    - pattern: http.Get(...)
+    - pattern: http.Post(...)
+    - pattern: http.NewRequest($M, ...)

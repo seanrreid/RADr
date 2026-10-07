@@ -21,6 +21,7 @@ const VERSION_OUTPUT: Readonly<Record<string, (v: string) => string>> = {
   ruff: (v) => `ruff ${v}`,
   pandoc: (v) => `pandoc ${v}\nFeatures: +server +lua`,
   typst: (v) => `typst ${v} (abcdef12)`,
+  opengrep: (v) => v,
 };
 
 /** Default behaviors: valid, empty results in each tool's real output format. */
@@ -30,6 +31,7 @@ export const DEFAULT_BEHAVIOR: Readonly<Record<string, string>> = {
   gitleaks: 'while [ $# -gt 0 ]; do if [ "$1" = "--report-path" ]; then shift; echo "[]" > "$1"; fi; shift; done',
   "osv-scanner": "echo '{\"results\":[]}'",
   syft: "exit 0",
+  opengrep: "echo '{\"results\":[],\"errors\":[]}'",
 };
 
 function script(tool: string, version: string, behavior: string): string {

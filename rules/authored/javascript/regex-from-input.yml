@@ -1,0 +1,20 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.javascript.regexp-from-variable
+  languages: [javascript, typescript]
+  severity: WARNING
+  message: >-
+    A regular expression is compiled from a non-literal value. If it can carry user input, an
+    attacker can supply a catastrophically backtracking pattern (ReDoS). Escape the input or
+    use a fixed pattern.
+  metadata:
+    cwe: ["CWE-1333: Inefficient Regular Expression Complexity"]
+    owasp: ["A05:2021 - Security Misconfiguration"]
+    source: radr
+  patterns:
+  - pattern-either:
+    - pattern: new RegExp($X, ...)
+    - pattern: RegExp($X, ...)
+  - pattern-not: new RegExp("...", ...)
+  - pattern-not: RegExp("...", ...)
+  - pattern-not: new RegExp(/.../, ...)

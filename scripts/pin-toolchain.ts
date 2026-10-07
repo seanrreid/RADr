@@ -66,6 +66,12 @@ const SPECS: Readonly<Record<string, ToolSpec>> = {
     assets: { "darwin-arm64": "syft_1.54.1_darwin_arm64.tar.gz", "darwin-x64": "syft_1.54.1_darwin_amd64.tar.gz", "linux-arm64": "syft_1.54.1_linux_arm64.tar.gz", "linux-x64": "syft_1.54.1_linux_amd64.tar.gz" },
     bin: () => "syft", versionArgs: ["version"], versionPattern: "Version:\\s+([0-9.]+)",
   },
+  // SAST engine (M3): LGPL-2.1, self-contained binaries; glibc builds for the Debian-based image.
+  opengrep: {
+    repo: "opengrep/opengrep", tag: "v1.30.1", version: "1.30.1", license: "LGPL-2.1", checksums: "github-api", archive: "binary",
+    assets: { "darwin-arm64": "opengrep_osx_arm64", "darwin-x64": "opengrep_osx_x86", "linux-arm64": "opengrep_manylinux_aarch64", "linux-x64": "opengrep_manylinux_x86" },
+    bin: (asset) => asset, versionArgs: ["--version"], versionPattern: "([0-9]+\\.[0-9]+\\.[0-9]+)",
+  },
   // Report rendering (M2): pandoc publishes no checksum file, Typst neither; both use GitHub's
   // per-asset digests. pandoc is GPL-2.0+ and is only ever invoked as a separate process.
   pandoc: {

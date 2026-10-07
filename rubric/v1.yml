@@ -34,6 +34,7 @@ base:
   eslint-project: { "2": low, "1": info, fatal: low }  # client config (lint project mode)
   ruff-project: { error: low }
   radr-build: { build-failed: high }                  # does not build from a clean checkout
+  opengrep: { ERROR: high, WARNING: medium, INFO: low } # sast lane (curated rule pack)
   radr-coverage: { tests-failed: medium, flaky-test: medium }
   # M3 tools (opengrep, bandit, gosec, checkov, …) are added here as their adapters land.
 

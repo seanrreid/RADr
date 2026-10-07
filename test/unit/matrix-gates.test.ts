@@ -14,7 +14,7 @@ describe("Matrix (policy/matrix.yml)", () => {
   const m = Matrix.load();
 
   it("has an entry for every (lane, outcome) pair (AC6)", () => {
-    assert.deepEqual(m.lanes, ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage"]);
+    assert.deepEqual(m.lanes, ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage", "sast"]);
     for (const lane of m.lanes) for (const outcome of m.outcomes) assert.doesNotThrow(() => m.resolve(lane, outcome, 1));
   });
 

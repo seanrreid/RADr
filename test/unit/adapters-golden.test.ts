@@ -9,7 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "../../src/core/determinism.js";
-import { ParseError, eslintAdapter, gitleaksAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../../src/normalize/adapters.js";
+import { ParseError, eslintAdapter, gitleaksAdapter, opengrepAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../../src/normalize/adapters.js";
 import { FILES } from "../helpers/fixture-repo.js";
 
 const golden = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/golden");
@@ -35,6 +35,7 @@ describe("adapter golden outputs (pinned tool versions)", () => {
   });
   it("osv-scanner", () => { check("osv-scanner", osvAdapter({ ...common, raw: read("osv-scanner"), rawRef: "raw/osv.json" })); });
   it("scc", () => { check("scc", sccMetrics(read("scc"))); });
+  it("opengrep", () => { check("opengrep", opengrepAdapter({ ...common, raw: read("opengrep"), rawRef: "raw/opengrep.json" })); });
 });
 
 describe("adapters refuse output they don't understand", () => {

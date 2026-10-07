@@ -150,7 +150,7 @@ client_licenses: []
   });
   it("rejects unknown keys, unknown lanes, and not-yet-available policies", () => {
     assert.throws(() => parseEngagement(`${base}surprise: 1\n`, "e.yml"), /surprise/);
-    assert.throws(() => parseEngagement(base.replace("lanes: [lint]", "lanes: [sast]"), "e.yml"), UsageError);
+    assert.throws(() => parseEngagement(base.replace("lanes: [lint]", "lanes: [fuzz]"), "e.yml"), UsageError);
     assert.throws(() => parseEngagement(base.replace("llm_policy: off", "llm_policy: code-allowed"), "e.yml"), /M4/);
     assert.throws(() => parseEngagement(base.replace("mode: offline, enforcement: declared", "mode: network, enforcement: container"), "e.yml"), /requires network mode "offline"/);
   });

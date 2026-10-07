@@ -256,3 +256,36 @@ export function sccMetrics(raw: string): CensusMetrics {
   for (const k of stableSort(Object.keys(files), (x) => x)) sortedFiles[k] = files[k] as FileMetric;
   return { languages, totals, files: sortedFiles };
 }
+
+/**
+ * Opengrep `--json --no-rewrite-rule-ids`. Rule messages in the pack are multi-paragraph
+ * remediation guides: the finding keeps the first sentence; CWE/OWASP become tags.
+ * Opengrep's own `fingerprint` is derived from path-dependent ids, so it is NOT used:
+ * identity comes from rule + path + code (store.ts).
+ */
+export function opengrepAdapter(input: AdapterInput): FindingDraft[] {
+  const root = obj(parseJson(input.raw, "opengrep"), "opengrep");
+  return arr(root["results"], "opengrep.results").map((entry, i) => {
+    const r = obj(entry, `opengrep.results[${i}]`);
+    const extra = obj(r["extra"], `opengrep.results[${i}].extra`);
+    const meta = extra["metadata"] === undefined || extra["metadata"] === null ? {} : obj(extra["metadata"], "opengrep metadata");
+    const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : typeof v === "string" ? [v] : []);
+    const cwes = stableSort([...new Set(list(meta["cwe"]).map((c) => /CWE-\d+/.exec(c)?.[0]).filter((c): c is string => c !== undefined))], (x) => x);
+    const owasp = stableSort([...new Set(list(meta["owasp"]).map((o) => o.split(" - ")[0]?.trim() ?? o))], (x) => x);
+    const file = repoPath(str(r["path"], "opengrep path"), input.repoRoot);
+    const line = int(obj(r["start"], "opengrep start")["line"], "opengrep start.line");
+    const end = int(obj(r["end"], "opengrep end")["line"], "opengrep end.line", line);
+    const lines = typeof extra["lines"] === "string" && extra["lines"] !== "requires login" ? extra["lines"] : null;
+    return {
+      ...base("sast", "opengrep", input.toolVersion),
+      rule_id: str(r["check_id"], "opengrep check_id"),
+      category: "security" as const,
+      file, line, end_line: end,
+      message: firstSentence(str(extra["message"], "opengrep message")),
+      tool_severity: str(extra["severity"], "opengrep severity"),
+      snippet: lines ?? excerpt(input.snippet, file, line, end),
+      raw_ref: `${input.rawRef}#/results/${i}`,
+      tags: [...cwes.map((c) => `cwe:${c}`), ...owasp.map((o) => `owasp:${o}`)],
+    };
+  });
+}

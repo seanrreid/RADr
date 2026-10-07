@@ -84,6 +84,7 @@ function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: Tool
   for (const line of lines) {
     const name = line.split(":")[0] ?? "";
     if (name.startsWith("config ruff")) byTool.set("ruff", "version-drift");
+    else if (name.startsWith("config rules")) byTool.set("opengrep", "version-drift"); // the rule pack changed
     else if (name.startsWith("config eslint") || name === "node-tools") byTool.set("node-tools", "version-drift");
     else if (name === "platform") for (const c of checks) byTool.set(c.tool, "version-drift");
     else if (name === "sandbox") byTool.set("sandbox", liveSandbox === null ? "tool-missing" : "version-drift");
@@ -112,7 +113,7 @@ function hostToolbox(home: string, l: Layout, checks: readonly ToolCheck[], runt
   }
   const { osvDb, depsCache } = snapshotsFor(home, l);
   return {
-    bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"),
+    bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"), rulesDir: assetPath("rules"),
     exec: hostExec(), sandbox: runtime === undefined ? null : { runtime, depsCache, nodeTools: nodeToolsDir(home) },
   };
 }
@@ -130,9 +131,10 @@ function containerToolbox(home: string, l: Layout, lock: ToolchainLock, runtime:
     { path: l.dir, readOnly: false },
     { path: path.join(l.dir, "source"), readOnly: true },
     ...(existsSync(path.join(home, "snapshots")) ? [{ path: path.join(home, "snapshots"), readOnly: true }] : []),
+    { path: assetPath("rules"), readOnly: true }, // same rules in both modes
   ];
   return {
-    bins: imageBins(platform), versions, nodeTools: IMAGE_NODE_TOOLS, node: IMAGE_NODE, osvDb, ruffConfig: `${IMAGE_CONFIGS}/ruff.toml`,
+    bins: imageBins(platform), versions, nodeTools: IMAGE_NODE_TOOLS, node: IMAGE_NODE, osvDb, ruffConfig: `${IMAGE_CONFIGS}/ruff.toml`, rulesDir: assetPath("rules"),
     exec: containerExec(runtime, assertSafeImage(image.tag), mounts),
     sandbox: { runtime, depsCache, nodeTools: nodeToolsDir(home) },
   };

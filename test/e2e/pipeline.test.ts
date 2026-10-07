@@ -122,7 +122,7 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
       return r.out;
     };
     // Human decisions on everything the rubric left pending (the review set).
-    for (const lane of ["secrets", "sca", "lint"]) {
+    for (const lane of ["secrets", "sca", "lint", "sast"]) {
       const r = await radr(home, env, "disposition", "--lane", lane, "confirmed", "--reason", "e2e: reviewed", "-e", "acme-e2e");
       assert.ok(r.code === 0 || /matched no findings|can move/.test(r.err), r.err);
     }

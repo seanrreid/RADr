@@ -9,6 +9,7 @@ import { currentImage } from "../toolchain/image.js";
 import { loadManifest } from "../toolchain/manifest.js";
 import { ESLINT_BASELINE } from "../toolchain/install.js";
 import { readAsset } from "../core/assets.js";
+import { rulePackHashes } from "../rules/pack.js";
 import { listContext, verifyContext } from "../toolchain/vulnctx.js";
 import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
@@ -185,6 +186,7 @@ async function containerLock(home: string, runtime: Runtime | undefined, sandbox
     configs: {
       eslint_baseline: hashBytes(readAsset(`toolchain/configs/eslint/${ESLINT_BASELINE}`)),
       ruff_baseline: hashBytes(readAsset("toolchain/configs/ruff/ruff.toml")),
+      ...rulePackHashes(),
     },
     sandbox: sandbox ?? null,
     image: { tag: img.tag, id: img.id, context_hash: img.contextHash },

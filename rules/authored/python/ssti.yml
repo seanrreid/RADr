@@ -1,0 +1,22 @@
+# License: radr original (Torch Code Lab)
+rules:
+- id: radr.python.ssti-template-from-variable
+  languages: [python]
+  severity: ERROR
+  message: >-
+    A template is built from a non-literal string, so user input can become template code
+    (server-side template injection). Render a fixed template file and pass data as context.
+  metadata:
+    cwe: ["CWE-1336: Improper Neutralization of Special Elements Used in a Template Engine"]
+    owasp: ["A03:2021 - Injection"]
+    source: radr
+  pattern-either:
+  - patterns:
+    - pattern: flask.render_template_string($T, ...)
+    - pattern-not: flask.render_template_string("...", ...)
+  - patterns:
+    - pattern: jinja2.Template($T, ...)
+    - pattern-not: jinja2.Template("...", ...)
+  - patterns:
+    - pattern: jinja2.Environment(...).from_string($T, ...)
+    - pattern-not: jinja2.Environment(...).from_string("...", ...)
