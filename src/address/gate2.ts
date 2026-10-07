@@ -9,6 +9,7 @@ import { hashBytes, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import type { Layout } from "../engagement/home.js";
 import { findingsSetHash } from "../findings/store.js";
+import { stateOf } from "../findings/disposition.js";
 import { inReviewSet } from "../rubric/rubric.js";
 import { treeHash } from "../sandbox/deps.js";
 import { EventLog } from "../state/events.js";
@@ -80,6 +81,12 @@ export function approveReport(l: Layout, actor: string, clock: Clock, acceptPart
     if (machineOnly.length > 0) {
       throw new RefusedError(`review-set finding(s) confirmed only by the rubric, not by a person: ${machineOnly.slice(0, SHOW_IDS).join(", ")} (confirm, dismiss, or waive them yourself)`);
     }
+  }
+  // Judgment findings (M4) are LLM proposals: each needs a person's decision, and a proposed or
+  // pending one blocks sign-off like a pending tool finding does (PRD Gate 2).
+  const undecided = inp.judgments.filter((j) => ["proposed", "pending"].includes(stateOf(inp.states, j.id))).map((j) => `${j.id} (${stateOf(inp.states, j.id)})`);
+  if (undecided.length > 0) {
+    throw new RefusedError(`judgment finding(s) not yet decided: ${undecided.slice(0, SHOW_IDS).join(", ")}${undecided.length > SHOW_IDS ? ", …" : ""} (confirm or dismiss them with \`radr disposition\`)`);
   }
   if (inp.runStatus === "partial" && (acceptPartial === undefined || acceptPartial.trim() === "")) {
     const partialLanes = stableSort([...inp.lanes].filter(([, o]) => o !== "success").map(([k]) => k), (k) => k);

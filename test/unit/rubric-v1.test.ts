@@ -126,7 +126,7 @@ describe("auto-confirm in a review + bulk disposition (AC3, AC4)", () => {
   // Fake gitleaks: one redacted secret (review set: never auto-confirmed).
   const GITLEAKS = `while [ $# -gt 0 ]; do if [ "$1" = "--report-path" ]; then shift; printf '[{"RuleID":"generic-api-key","Description":"Generic key","StartLine":2,"EndLine":2,"Secret":"REDACTED","Match":"REDACTED","File":"config/deploy.env","Commit":"98f8ed3e3ef3e67a990e53ac3cb526772b79ab73","Fingerprint":"98f8:config/deploy.env:generic-api-key:2"}]' > "$1"; fi; shift; done`;
 
-  it("confirms routine findings as rubric@v1, leaves the review set pending, and supports bulk decisions", async () => {
+  it("confirms routine findings as rubric@<version> (v2 for new scopes), leaves the review set pending, and supports bulk decisions", async () => {
     const home = tmpDir();
     await seedHome(home);
     setFakeTool(home, "ruff", RUFF);
@@ -141,7 +141,7 @@ describe("auto-confirm in a review + bulk disposition (AC3, AC4)", () => {
 
     const l = layout(home, "acme-audit");
     const dispositionEvents = () => new EventLog(l.events, fixedClock("2026-01-01T00:00:00Z")).read().filter((e) => e.type === "finding-disposition");
-    assert.deepEqual(dispositionEvents().map((e) => e.actor), ["rubric@v1", "rubric@v1"]);
+    assert.deepEqual(dispositionEvents().map((e) => e.actor), ["rubric@v2", "rubric@v2"]);
     assert.match((await radr("findings", "-e", "acme-audit", "--state", "pending")).out, /gitleaks\/generic-api-key/);
 
     assert.equal((await radr("disposition", "--lane", "nope", "dismissed", "--reason", "x", "-e", "acme-audit")).code, 1, "empty selector refuses");

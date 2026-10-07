@@ -6,7 +6,8 @@ import { hash, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import { loadEngagement, type EngagementDoc } from "../engagement/config.js";
 import type { Layout } from "../engagement/home.js";
-import { dispositions, type DispositionState } from "../findings/disposition.js";
+import { dispositions, stateOf, type DispositionState } from "../findings/disposition.js";
+import { runJudgments, type Judgment } from "../findings/judgments.js";
 import { latestRunFindings } from "../findings/store.js";
 import type { Finding } from "../findings/types.js";
 import { readRunMetrics } from "../review/run.js";
@@ -19,6 +20,8 @@ export interface RunInputs {
   readonly runId: string;
   readonly runStatus: "complete" | "partial" | "aborted";
   readonly findings: readonly Finding[];
+  /** Judgment findings proposed against this run (M4), consultant severity overrides applied. */
+  readonly judgments: readonly Judgment[];
   readonly states: ReadonlyMap<string, DispositionState>;
   readonly metrics: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Lane → final outcome, for lanes whose final action wasn't abort. */
@@ -46,11 +49,16 @@ export function loadRunInputs(l: Layout, clock: Clock): RunInputs {
   return {
     doc, rubric: loadRubric(doc.rubric), runId, runStatus,
     findings: runStatus === "aborted" ? [] : findings,
+    judgments: runStatus === "aborted" ? [] : runJudgments(l.judgments, runId, events),
     states: dispositions(events), metrics: readRunMetrics(l, runId), lanes, lanesRun: new Set(lanes.keys()), notes, events,
   };
 }
 
 /** Hash of every present finding's current disposition: a report is only valid for these states. */
-export function dispositionsHash(inp: RunInputs): string {
-  return hash(stableSort(inp.findings, (f) => f.id).map((f) => [f.id, inp.states.get(f.id) ?? "pending"]));
+export function dispositionsHash(inp: Pick<RunInputs, "findings" | "judgments" | "states">): string {
+  const tool = stableSort(inp.findings, (f) => f.id).map((f) => [f.id, inp.states.get(f.id) ?? "pending"]);
+  if (inp.judgments.length === 0) return hash(tool);
+  // With judgment findings, their state and (overridable) severity count too. Without any, the
+  // hash is exactly what it was before M4, so earlier approvals still verify.
+  return hash({ tool, judgments: inp.judgments.map((j) => [j.id, stateOf(inp.states, j.id), j.severity]) });
 }

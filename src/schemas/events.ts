@@ -22,6 +22,8 @@ const str = { type: "string", minLength: 1 } as const;
 const sha = { type: "string", pattern: SHA256 } as const;
 const runId = { type: "string", pattern: "^R-[0-9]{4}$" } as const;
 const laneId = { type: "string", pattern: SLUG } as const;
+const FINDING_ID = "^[FJ]-[0-9]{4,}$";
+const SEVERITY_ENUM = ["info", "low", "medium", "high", "critical"];
 const obj = (properties: Record<string, unknown>, required: string[] = Object.keys(properties)): AnySchema => ({
   type: "object",
   additionalProperties: false,
@@ -89,10 +91,22 @@ const PAYLOADS = {
     },
     ["call_id", "purpose", "policy", "attempt", "argv_hash", "prompt_hash", "response_hash", "outcome", "action"],
   ),
+  // finding_id: F- (tool findings); J- (judgment findings) since M4. Widening a pattern is
+  // additive: every older event still validates.
   "finding-disposition": obj(
-    { finding_id: { type: "string", pattern: "^F-[0-9]{4,}$" }, from: str, to: str, reason: { type: "string" } },
+    { finding_id: { type: "string", pattern: FINDING_ID }, from: str, to: str, reason: { type: "string" } },
     ["finding_id", "from", "to"],
   ),
+  // M4: a judgment finding proposed by the LLM lane. judgments.jsonl holds the record; its
+  // canonical-JSON hash is frozen here.
+  "finding-proposed": obj({
+    finding_id: { type: "string", pattern: "^J-[0-9]{4,}$" }, run_id: runId,
+    call_id: { type: "string", pattern: "^L-[0-9]{4,}$" }, record_hash: sha,
+  }),
+  // M4: a consultant's severity decision (PRD §10). Not a state transition; the reason is required.
+  "severity-override": obj({
+    finding_id: { type: "string", pattern: FINDING_ID }, from: { enum: SEVERITY_ENUM }, to: { enum: SEVERITY_ENUM }, reason: str,
+  }),
 } as const satisfies Record<string, AnySchema>;
 
 export type EventType = keyof typeof PAYLOADS;

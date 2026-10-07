@@ -86,7 +86,7 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
         stacks: detection.stacks,
         // Host mode by default: image-only lanes and opt-in lanes are added by the consultant.
         lanes: LANES.filter((x) => (canSandbox || !SANDBOX_LANES.includes(x)) && !CONTAINER_LANES.includes(x) && !OPTIONAL_LANES.includes(x)),
-        rubric: "v1",
+        rubric: "v2",
         network: { mode: "offline", enforcement: "declared" },
         llm_policy: "off",
         client_licenses: [],

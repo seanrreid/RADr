@@ -59,7 +59,7 @@ export interface ReviewResult {
 }
 
 /** Throws RefusedError unless the scope gate is open for the CURRENT scope and worktree. */
-async function assertScope(l: Layout, gates: Gates, log: EventLog): Promise<{ doc: EngagementDoc; fingerprint: string }> {
+export async function assertScope(l: Layout, gates: Gates, log: EventLog): Promise<{ doc: EngagementDoc; fingerprint: string }> {
   const inputs = readScopeInputs(l);
   const fingerprint = scopeFingerprint(inputs);
   const g = gates.evaluate("scope", log.read(), { fingerprint });

@@ -72,7 +72,7 @@ interface DocV0 {
 }
 
 interface DocV1 extends Omit<DocV0, "version"> {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly severities: readonly Severity[];
   readonly definitions: Readonly<Record<Severity, string>>;
   readonly rule_overrides: Readonly<Record<string, Readonly<Record<string, Severity>>>>;
@@ -103,7 +103,7 @@ const validateV1 = makeValidator<DocV1>(
     required: ["version", "severities", "definitions", "base", "rule_overrides", "cvss_bands_x10", "promote", "path_modifiers", "disposition", "scorecard", "effort",
       "licenses", "engagement_overrides"],
     properties: {
-      version: { const: 1 },
+      version: { enum: [1, 2] },
       severities: { type: "array", items: sevEnum },
       definitions: { type: "object", additionalProperties: false, required: [...SEVERITIES], properties: Object.fromEntries(SEVERITIES.map((s) => [s, { type: "string" }])) },
       base: baseMap,
@@ -230,16 +230,17 @@ export function licenseClassifier(spec: DocV1["licenses"]): (expression: string)
   };
 }
 
-function rubricV1(doc: DocV1): Rubric {
+/** v1 and v2 share a format (v2 adds base entries only). */
+function rubricV1(doc: DocV1, version: "v1" | "v2"): Rubric {
   return {
     classifyLicense: licenseClassifier(doc.licenses),
-    version: "v1",
+    version,
     routing: doc.disposition,
     scorecard: doc.scorecard,
     effort: doc.effort,
     definitions: doc.definitions,
     assess(d, vulns, ctx = {}) {
-      let severity = baseSeverity(doc, d, "v1");
+      let severity = baseSeverity(doc, d, version);
       const override = Object.hasOwn(doc.rule_overrides, d.tool) ? doc.rule_overrides[d.tool] : undefined;
       if (override !== undefined && Object.hasOwn(override, d.rule_id)) severity = override[d.rule_id] ?? severity;
 
@@ -267,8 +268,13 @@ function rubricV1(doc: DocV1): Rubric {
 
 export function loadRubric(version: string): Rubric {
   if (version === "v0") return rubricV0(validateV0(parseYaml(readAsset("rubric/v0.yml"), "rubric/v0.yml"), "rubric/v0.yml"));
-  if (version === "v1") return rubricV1(validateV1(parseYaml(readAsset("rubric/v1.yml"), "rubric/v1.yml"), "rubric/v1.yml"));
-  throw new UsageError(`unknown rubric "${version}" (available: v0, v1)`);
+  if (version === "v1" || version === "v2") {
+    const file = `rubric/${version}.yml`;
+    const doc = validateV1(parseYaml(readAsset(file), file), file);
+    if (`v${String(doc.version)}` !== version) throw new UsageError(`${file} declares version ${String(doc.version)}`);
+    return rubricV1(doc, version);
+  }
+  throw new UsageError(`unknown rubric "${version}" (available: v0, v1, v2)`);
 }
 
 /** Is this finding in the always-human review set (PRD §8)? */

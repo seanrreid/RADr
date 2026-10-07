@@ -7,7 +7,9 @@ import { RefusedError, UsageError } from "../../core/errors.js";
 import { loadEngagement } from "../../engagement/config.js";
 import { radrHome, resolveEngagement } from "../../engagement/home.js";
 import { checkTransition, dispositions, isState, stateOf } from "../../findings/disposition.js";
+import { readJudgments, runJudgments } from "../../findings/judgments.js";
 import { findingsSetHash, latestRunFindings, readStore } from "../../findings/store.js";
+import { readAnnotations, type Annotation } from "../../llm/triage.js";
 import { SEVERITIES, type Finding } from "../../findings/types.js";
 import { review as runReview } from "../../review/run.js";
 import { computeScorecard } from "../../address/scorecard.js";
@@ -43,10 +45,28 @@ export const review: CommandSpec = {
   },
 };
 
-function printFinding(ctx: CliContext, f: Finding, state: string): void {
+function printFinding(ctx: CliContext, f: Finding, state: string, notes: readonly Annotation[] = []): void {
   const loc = f.line > 0 ? `${f.file}:${f.line}` : f.file;
-  ctx.out(`${f.id}  ${f.severity.padEnd(8)} ${state.padEnd(9)} ${f.lane.padEnd(7)} ${f.tool}/${f.rule_id}  ${loc}`);
+  const source = f.class === "judgment" ? "judgment (LLM-proposed)" : `${f.tool}/${f.rule_id}`;
+  ctx.out(`${f.id}  ${f.severity.padEnd(8)} ${state.padEnd(9)} ${f.lane.padEnd(7)} ${source}  ${loc}`);
   ctx.out(`        ${f.message}`);
+  // LLM annotations are labelled and display-only (M4): proposals, never decisions.
+  for (const n of notes) {
+    if (n.type === "explanation") ctx.out(`        [LLM] ${n.text}`);
+    else if (n.type === "disposition-proposal") ctx.out(`        [LLM proposes ${n.proposed}] ${n.reason}`);
+    else if (n.type === "cluster") ctx.out(`        [LLM cluster ${n.finding_ids.join(", ")}] ${n.rationale}`);
+  }
+}
+
+/** Annotations per finding id (clusters listed under each member). */
+function notesById(notes: readonly Annotation[]): Map<string, Annotation[]> {
+  const out = new Map<string, Annotation[]>();
+  const add = (id: string, n: Annotation) => out.set(id, [...(out.get(id) ?? []), n]);
+  for (const n of notes) {
+    if (n.type === "cluster") for (const id of n.finding_ids) add(id, n);
+    else if (n.type !== "rejected") add(n.finding_id, n);
+  }
+  return out;
 }
 
 export const findings: CommandSpec = {
@@ -66,9 +86,11 @@ export const findings: CommandSpec = {
     }
     if (values.severity !== undefined && sevRank(values.severity) < 0) throw new UsageError(`unknown severity "${values.severity}"`);
     if (values.state !== undefined && !isState(values.state)) throw new UsageError(`unknown state "${values.state}"`);
-    const states = dispositions(new EventLog(l.events, ctx.clock).read());
+    const events = new EventLog(l.events, ctx.clock).read();
+    const states = dispositions(events);
+    const judged = runId === null ? [] : runJudgments(l.judgments, runId, events);
     const selected = stableSort(
-      present.filter((f) =>
+      [...present, ...judged].filter((f) =>
         (values.severity === undefined || sevRank(f.severity) >= sevRank(values.severity)) &&
         (values.lane === undefined || f.lane === values.lane) &&
         (values.state === undefined || stateOf(states, f.id) === values.state)),
@@ -82,8 +104,9 @@ export const findings: CommandSpec = {
       ctx.out("no findings yet (run `radr review`)");
       return;
     }
-    for (const f of selected) printFinding(ctx, f, stateOf(states, f.id));
-    ctx.out(`${selected.length} of ${present.length} findings (run ${runId})`);
+    const notes = notesById(readAnnotations(l, runId));
+    for (const f of selected) printFinding(ctx, f, stateOf(states, f.id), notes.get(f.id));
+    ctx.out(`${selected.length} of ${present.length + judged.length} findings (run ${runId}${judged.length > 0 ? `; ${String(judged.length)} judgment` : ""})`);
   },
 };
 
@@ -108,7 +131,8 @@ export const disposition: CommandSpec = {
 
     if (!bulk) {
       const id = positionals[0] ?? "";
-      if (readStore(l.findings).findings.find((f) => f.id === id) === undefined) throw new UsageError(`no finding ${id} in ${l.id}`);
+      const known = id.startsWith("J-") ? readJudgments(l.judgments).some((j) => j.id === id) : readStore(l.findings).findings.some((f) => f.id === id);
+      if (!known) throw new UsageError(`no finding ${id} in ${l.id}`);
       const from = stateOf(states, id);
       checkTransition(from, to, reason);
       log.append("finding-disposition", actor, { finding_id: id, from, to, ...(reason !== undefined ? { reason } : {}) });
@@ -178,18 +202,23 @@ export const status: CommandSpec = {
     const byState = ["pending", "confirmed", "dismissed", "waived"].map((s) => `${s}=${present.filter((f) => stateOf(states, f.id) === s).length}`).join(" ");
     ctx.out(`  findings ${present.length}: ${bySev}`);
     ctx.out(`  states:  ${byState}`);
+    const judged = runJudgments(l.judgments, runId, events);
+    if (judged.length > 0) {
+      const jStates = ["proposed", "pending", "confirmed", "dismissed", "waived"].map((s) => `${s}=${judged.filter((j) => stateOf(states, j.id) === s).length}`).join(" ");
+      ctx.out(`  judgment ${judged.length}: ${jStates}`);
+    }
   },
 };
 
 export const scorecard: CommandSpec = {
   name: "scorecard",
   usage: "radr scorecard [-e <id>] [--json]",
-  summary: "triage scorecard for the latest run (rubric v1)",
+  summary: "triage scorecard for the latest run (rubric v1+)",
   run(args, ctx) {
     const { values } = parse(args, { ...ENGAGEMENT_OPTION, json: { type: "boolean" } }, 0);
     const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
     const inp = loadRunInputs(l, ctx.clock);
-    if (inp.rubric.scorecard === undefined) throw new RefusedError(`rubric ${inp.rubric.version} has no scorecard (use rubric v1)`);
+    if (inp.rubric.scorecard === undefined) throw new RefusedError(`rubric ${inp.rubric.version} has no scorecard (use rubric v1 or later)`);
     const card = computeScorecard(inp.rubric.scorecard, inp);
     if (values.json === true) {
       ctx.out(canonicalJson({ run_id: inp.runId, verdict: card.verdict, rows: card.rows.map((r) => ({ ...r })) }));

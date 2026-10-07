@@ -32,6 +32,8 @@ export interface Layout {
   readonly artifacts: string;
   /** Every prompt and response sent to the agent (PRD §8, §9). */
   readonly llm: string;
+  /** Judgment findings proposed by the LLM lane (M4). */
+  readonly judgments: string;
 }
 
 export function layout(home: string, id: string): Layout {
@@ -52,6 +54,7 @@ export function layout(home: string, id: string): Layout {
     findings: path.join(dir, "findings.jsonl"),
     artifacts: path.join(dir, "artifacts"),
     llm: path.join(dir, "llm"),
+    judgments: path.join(dir, "judgments.jsonl"),
   };
 }
 

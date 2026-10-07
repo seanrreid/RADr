@@ -1,0 +1,179 @@
+# rubric/v2.yml: severity, disposition routing, triage scorecard, and remediation effort.
+# PRD §8 (dispositions), §10 (severity), §5 (triage scorecard), §12 (effort).
+#
+# v2 = v1 plus one base entry: radr-judgment (M4 judgment findings, proposed by the LLM lane and
+# confirmed by a consultant). Everything else is v1 unchanged.
+#
+# The rubric is DATA. radr loads it (src/rubric/rubric.ts), and its content hash is part of the
+# scope fingerprint. Once an engagement has approved a scope with this version, changes ship
+# as a new file (v2.yml) and this file is never edited.
+#
+# Determinism rules for this file:
+#   - No floats. CVSS is in tenths (9.0 → 90). EPSS is in basis points (0.10 → 1000).
+#     Ratios are integer percent or per-mille, as named.
+#   - Lookups are exhaustive. An unmapped (tool, tool_severity) pair is an ERROR, never a default.
+#   - Severity pipeline, in order: base → rule override → vulnerability promotion →
+#     path modifiers. Each modifier moves at most one step, clamped to [info, critical].
+
+version: 2
+severities: [info, low, medium, high, critical]
+
+# Client-facing definitions (rendered in every report's methodology section).
+definitions:
+  critical: "Likely exploitable now with serious impact (data breach, takeover, known-exploited vulnerability). Fix immediately."
+  high: "Exploitable or high-impact weakness requiring attention this cycle."
+  medium: "Real weakness or significant quality risk; schedule remediation."
+  low: "Minor weakness or quality issue; fix opportunistically."
+  info: "Observation or metric context; no action required on its own."
+
+# --- 1. Base: (tool, tool_severity) → severity | from-cvss -------------------------------------
+base:
+  eslint: { "2": low, "1": info, fatal: low }          # ESLint JSON: 2 = error, 1 = warning
+  ruff: { error: low }                                  # ruff has no severity levels
+  gitleaks: { secret: high }                            # every secret starts high; see overrides
+  osv-scanner: { cvss: from-cvss, unscored: medium }
+  tsc: { error: low }
+  mypy: { error: low, note: info }
+  eslint-project: { "2": low, "1": info, fatal: low }  # client config (lint project mode)
+  ruff-project: { error: low }
+  radr-build: { build-failed: high }                  # does not build from a clean checkout
+  opengrep: { ERROR: high, WARNING: medium, INFO: low } # sast lane (curated rule pack)
+  radr-coverage: { tests-failed: medium, flaky-test: medium }
+  lizard: { complex: low, very-complex: medium }       # maint: CCN > 15 / CCN > 30 (see maint lane)
+  jscpd: { clone: info }                                # maint: duplicated block (the % is a scorecard metric)
+  checkov: { failed: medium }                           # iac: offline checks carry no severity of their own
+  hadolint: { error: medium, warning: low, info: info, style: info }
+  scancode: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }  # source licenses, by §4 class
+  syft: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }      # dependency licenses (SBOM)
+  scorecard: { failing: medium, weak: low }             # hygiene: Scorecard check score 0–2 / 3–4
+  # M3 W5: sandboxed per-stack tools.
+  go-vet: { error: low }                                # types: go vet (compile errors + vet checks)
+  golangci-lint: { issue: low }                         # lint: no severities in the default linters
+  rustc: { error: low }                                 # types: cargo check errors
+  clippy: { warning: low, error: medium }               # lint: deny-level clippy lints report as error
+  javac: { error: low }                                 # types: javac / kotlinc compile errors
+  pmd: { "1": medium, "2": low, "3": low, "4": info, "5": info }   # lint: PMD priority 1 (high) … 5 (low)
+  phpstan: { error: low }                               # types: PHPStan level 5
+  rubocop: { fatal: medium, error: low, warning: low, convention: info, refactor: info, info: info }
+  dotnet-build: { error: low }                          # types: C#/F#/VB compiler errors
+  dotnet-analyzers: { warning: low, error: medium }     # lint: .NET CA analyzers (security mode: all)
+  # M4: judgment findings. The LLM never supplies a severity; every judgment starts here, and the
+  # consultant adjusts it with a severity-override event.
+  radr-judgment: { judgment: medium }
+
+# --- 2. Rule overrides: exact (tool, rule_id) → severity, applied after base ---------------------
+# Rule IDs must exist in the pinned tool version; radr checks gitleaks IDs against its rule list.
+rule_overrides:
+  gitleaks:
+    private-key: critical
+    aws-access-token: critical
+    gcp-service-account: critical
+    github-pat: critical
+    stripe-access-token: critical
+    generic-api-key: medium          # high false-positive rate; still always in the review set
+  rubocop:
+    Security/Eval: medium
+    Security/Open: medium
+    Security/MarshalLoad: medium
+    Security/YAMLLoad: medium
+  dotnet-analyzers:
+    CA2100: medium                   # SQL built from strings
+    CA3001: medium                   # SQL injection (taint)
+    CA3006: medium                   # process command injection (taint)
+    CA3075: medium                   # insecure DTD processing (XXE)
+    CA5351: medium                   # broken cryptographic algorithm
+
+# --- 3. Vulnerabilities: CVSS bands, then promotion (never demotion) -----------------------------
+cvss_bands_x10:
+  - { min: 90, severity: critical }
+  - { min: 70, severity: high }
+  - { min: 40, severity: medium }
+  - { min: 1, severity: low }
+  - { min: 0, severity: info }
+promote:
+  kev_listed: critical               # CISA Known Exploited Vulnerabilities → critical
+  epss_bp_at_least: 1000             # EPSS ≥ 10% (30-day exploitation probability) → +1 step
+
+# --- 4. Path modifiers ---------------------------------------------------------------------------
+path_modifiers:
+  demote:                            # non-production code: −1 step
+    globs: ["**/test/**", "**/tests/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*",
+            "**/fixtures/**", "**/examples/**", "**/docs/**", "**/testdata/**"]
+    categories: [quality, maintainability, security, iac]   # never secrets or dependency
+  promote:                           # sensitive code: +1 step
+    globs: ["**/auth/**", "**/authn/**", "**/authz/**", "**/security/**", "**/crypto/**",
+            "**/payment*/**", "**/billing/**", "**/admin/**"]
+    categories: [security]
+
+# --- 4b. Licenses (license lane) ----------------------------------------------------------------
+# An SPDX id maps to a class by exact id or by a prefix ending in "*". An expression's class:
+# A AND B → the worse; A OR B → the better (the licensee chooses); X WITH E → X's class, unless
+# E is a linking exception (then at most weak-copyleft). Unmapped ids are "unknown", never guessed.
+# Permissive findings are not emitted; the engagement's client_licenses are never flagged.
+licenses:
+  order: [permissive, weak-copyleft, unknown, strong-copyleft, restricted, network-copyleft]  # better → worse
+  classes:
+    permissive: [MIT, MIT-0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSD-3-Clause-Clear, 0BSD, ISC, Zlib, Unlicense, CC0-1.0,
+                 BSL-1.0, Python-2.0, PSF-2.0, X11, PostgreSQL, WTFPL, CC-BY-3.0, CC-BY-4.0, BlueOak-1.0.0, Unicode-DFS-2016,
+                 Unicode-3.0, NCSA, Artistic-2.0, OFL-1.1, curl, LicenseRef-scancode-public-domain]
+    weak-copyleft: ["LGPL-*", "MPL-*", "EPL-*", "CDDL-*", "EUPL-*", "CPL-1.0", "OSL-*", CC-BY-SA-4.0, CC-BY-SA-3.0]
+    strong-copyleft: ["GPL-*"]
+    network-copyleft: ["AGPL-*", "SSPL-*"]
+    restricted: ["CC-BY-NC-*", "CC-BY-ND-*", BUSL-1.1, Elastic-2.0, "PolyForm-*", LicenseRef-scancode-commons-clause,
+                 LicenseRef-scancode-proprietary-license, LicenseRef-scancode-other-permissive-noncommercial]
+  linking_exceptions: [Classpath-exception-2.0, LLVM-exception, GCC-exception-3.1, GCC-exception-2.0, Autoconf-exception-3.0, Bison-exception-2.2]
+
+# --- 4c. Engagement-type overrides: applied last, ±1 step ---------------------------------------
+engagement_overrides:
+  due-diligence: { categories: [license], step: 1 }   # license risk is a deal term in DD
+
+# --- 5. Disposition routing (PRD §8) -------------------------------------------------------------
+disposition:
+  auto_confirm:
+    lanes: [lint, types, sca, maint]
+    max_severity: medium             # auto-confirm only findings at medium or below
+    sca_requires_cve: true           # an SCA finding auto-confirms only with a CVE
+  review_set:                        # always human-dispositioned, whatever the lane rules say
+    lanes: [sast, secrets, iac, license]
+    classes: [judgment]
+    min_severity: high               # anything ≥ high, in any lane
+
+# --- 6. Triage scorecard (PRD §5) ----------------------------------------------------------------
+# better: lower  → value ≤ green is green; value ≥ red is red; otherwise amber.
+# better: higher → value ≥ green is green; value ≤ red is red; otherwise amber.
+# A metric whose lane didn't run is grey ("unavailable"), never estimated.
+scorecard:
+  metrics:
+    lint_errors_per_kloc_x10: { better: lower, green: 19, red: 100, label: "Lint errors per 1,000 lines (×10)" }
+    type_errors: { better: lower, green: 0, red: 21, label: "Type errors" }
+    duplication_pct: { better: lower, green: 2, red: 9, label: "Duplicated code (%)" }
+    complex_functions_pct: { better: lower, green: 4, red: 16, label: "Functions with complexity > 15 (%)" }
+    test_ratio_pct: { better: higher, green: 50, red: 19, label: "Test code vs. source code (%)" }
+    bus_factor: { better: higher, green: 3, red: 1, label: "Bus factor (authors covering 50% of recent commits)" }
+    churn_hotspot_pct: { better: lower, green: 19, red: 41, label: "Churn in complex files (%)" }
+  categorical:
+    dependency_vulns: { label: "Known-vulnerable dependencies", green: none, amber: any-high, red: any-critical-or-kev }
+    secrets: { label: "Secrets in code or history", green: none, amber: history-only, red: present-at-head }
+  verdict:
+    at_risk: { red_in: [secrets, dependency_vulns], reds_at_least: 3 }
+    needs_attention: { reds_at_least: 1, ambers_at_least: 3 }
+    # otherwise: healthy. Thresholds are first-pass; calibrate after 3 engagements (as v2).
+
+# --- 7. Remediation effort (PRD §12) -------------------------------------------------------------
+effort:
+  sizes: { S: "< 1 day", M: "1–5 days", L: "> 1 week" }
+  by_kind:
+    dependency-upgrade: S
+    secret-rotation: S
+    lint-cleanup: S
+    type-errors: M
+    sast-fix: S
+    build-reproducibility: M
+    test-coverage: M
+    flaky-tests: M
+    reduce-complexity: M
+    deduplicate: S
+    iac-hardening: S
+    license-review: M
+    repo-hygiene: S
+  # Consultant overrides per plan item are recorded as events.
