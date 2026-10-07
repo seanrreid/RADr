@@ -87,7 +87,43 @@
   PHPStan, RuboCop, and dotnet analyzers, plus coverage where practical.
 - **W6 — E2E, docs, and as-built.**
 
-## As built (running notes; finalized in W6)
+## As built (2026-10-07)
+
+### Acceptance criteria
+
+| AC | Status | Evidence |
+|---|---|---|
+| AC1 image build, offline-verifiable | ✅ | `radr tools build-image`; fetch.py checks every sha256; `--require-hashes`; `npm ci --ignore-scripts` |
+| AC2 container mode, network denied | ✅ | e2e: static lanes in the image + network-denial eval |
+| AC3 host = container findings | ✅ | e2e: identical findings-set hashes (including `maint`) |
+| AC4 sast with the versioned pack | ✅ | rule-pack hashes in `toolchain.lock`; CWE/OWASP tags; rubric mapping |
+| AC5 provenance, licenses, fixtures | ✅ | `scripts/check-rules.ts` in CI (349 rules, every fixture passes) |
+| AC6 support bar | ✅ | `radr rules coverage`; all 8 stacks supported; stated in the report methodology |
+| AC7 maint + scorecard rows | ✅ | lizard/jscpd findings; `complex_functions_pct`, `duplication_pct` |
+| AC8 license + DD overrides | ✅ | ScanCode + SBOM; rubric §4b classes; §4c due-diligence step |
+| AC9 iac offline | ✅ | Checkov + hadolint in the image; e2e planted signals |
+| AC10 hygiene optional | ✅ | Scorecard offline subset; the matrix row never makes a run partial |
+| AC11 six stacks detected; sca + sast each | ✅ | polyglot e2e: every advisory and planted SAST signal found |
+| AC12 per-stack sandboxed lint/types/tests | ✅ (coverage % for Go only) | stack sandbox e2e; see the W5 table |
+
+### W0 — Container toolchain
+
+The toolchain image is built locally from a generated Containerfile:
+- a pinned base
+- apt from a fixed Debian snapshot
+- every binary sha256-checked during the build
+- Python tools installed with `--require-hashes`
+
+Container mode (`network.enforcement: container`) runs static lanes in the image with
+`--network=none` and same-path mounts. The image ID is locked in `toolchain.lock`.
+
+### W1 — SAST
+
+Opengrep 1.30.1 runs with `--no-rewrite-rule-ids` and a UTF-8 locale. The pack is built by
+`scripts/pack-rules.ts` from pinned GitLab sast-rules and elttam commits. Each file is
+classified by its own license header (MIT/Apache-2.0 into `rules/pack`, LGPL-3.0 into
+`rules/lgpl`), and a rule is kept only if it passes its own fixtures. `PROVENANCE.lock`
+records every file, and `check-rules` re-verifies it in CI.
 
 ### W2 — Health lanes
 
@@ -221,3 +257,12 @@
   - the AC12 e2e (`test/fixtures/stack-sandbox`): warm once, then lint, types and tests run
     offline for all six stacks, every planted signal is found, nothing fails to build, and
     tests are stable
+
+### Open items carried forward
+
+- Coverage percentages for Rust, JVM, PHP, Ruby and .NET need per-project build
+  configuration (cargo-llvm-cov, JaCoCo, pcov, SimpleCov, coverlet).
+- The LGPL sub-pack is pending counsel.
+- The package license is still UNLICENSED.
+- Per-test flaky detection (today a whole run is compared to a whole run).
+- Kotlin lint (detekt) and Gradle builds without a wrapper.

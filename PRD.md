@@ -420,8 +420,8 @@ Vetting notes and sources: Appendix A (checked 2026-10-07; re-verify at pin time
 |---|---|---|---|
 | `census` | scc | — | LOC, languages, COCOMO-free |
 | `lint` | eslint (TS/JS), ruff (Py), golangci-lint (Go), clippy (Rust), PMD / detekt (JVM), PHPStan (PHP), RuboCop (Ruby), NetAnalyzers (.NET) | Biome, staticcheck, Checkstyle, ktlint, Roslynator | Two modes. **Baseline:** radr's own pinned configs, no client deps, comparable across engagements. **Project:** the client's own config and plugins, run in the sandbox. Findings are tagged with their mode. |
-| `types` | tsc (client's own, else pinned), mypy (pinned) | pyright, PHPStan levels | Needs deps installed → sandboxed build (mypy chosen over pyright in M2: installs with pip in the Python sandbox) |
-| `sast` | **Opengrep** + curated rule pack; bandit, gosec, SpotBugs + FindSecBugs, Psalm taint, NetAnalyzers CA security rules | Semgrep CE (fetched rules only, see §14.2) | CodeQL and Brakeman are **client-licensed plug-ins only** |
+| `types` | tsc (client's own, else pinned), mypy (pinned), `go vet`, `cargo check`, javac/kotlinc, PHPStan (level 5), `dotnet build` | pyright | Needs deps installed → sandboxed build (mypy chosen over pyright in M2: installs with pip in the Python sandbox; M3 per-stack drivers, [as built](docs/m3-plan.md#w5--stacks-sandboxed)) |
+| `sast` | **Opengrep** + curated rule pack (all 8 stacks meet the top-10 support bar as of M3; PHP, Ruby, Rust via radr-authored rules); NetAnalyzers CA security rules (lint lane) | bandit, gosec, SpotBugs + FindSecBugs, Psalm taint; Semgrep CE (fetched rules only, see §14.2) | CodeQL and Brakeman are **client-licensed plug-ins only** |
 | `secrets` | gitleaks (HEAD in `triage`; **full history in `standard`/`deep`**; the PR's commit range in `diff`) | Betterleaks (planned successor), TruffleHog **with `--no-verification` only** | Live verification is forbidden. No commit or time bound on history: the timeout exists only as a safety net, and hitting it is a `partial` outcome that blocks Gate 2 unless `--accept-partial` is used |
 | `sca` | osv-scanner v2 (`--offline`, snapshotted DB) + syft SBOM | grype (second opinion), cargo-audit, govulncheck, bundler-audit | npm/pip/composer/dotnet auditors are network-mode only |
 | `license` | ScanCode Toolkit | syft license data, licensee | |
@@ -429,7 +429,7 @@ Vetting notes and sources: Appendix A (checked 2026-10-07; re-verify at pin time
 | `maint` | lizard (complexity), jscpd (duplication) | knip (TS), vulture (Py), Go `deadcode` | |
 | `history` | built-in `git log --numstat` analyzer (churn × complexity, ownership, bus factor) | code-maat (GPL, external process) | Own implementation keeps it deterministic and dependency-free |
 | `tests` | static test signal (presence / ratio) | — | All tiers |
-| `coverage` | measured coverage run in the build sandbox (§14.1a) | c8, pytest-cov, `go test -cover`, cargo-llvm-cov, JaCoCo, phpunit+pcov, simplecov, coverlet → LCOV/Cobertura | `standard`/`deep`; runs client code → sandbox |
+| `coverage` | measured coverage run in the build sandbox (§14.1a): c8 (TS/JS), coverage.py (Python), `go test -coverprofile` (Go, statements); the other stacks run their tests twice for pass/fail + stability | cargo-llvm-cov, JaCoCo, phpunit+pcov, simplecov, coverlet → LCOV/Cobertura (needs per-project build config; deferred) | `standard`/`deep`; runs client code → sandbox |
 | `hygiene` | OpenSSF Scorecard `--local` | Full Scorecard (network + token) | Optional lane |
 
 Debug toolkit: `git bisect run`, native test runners + coverage diff, py-spy /
@@ -725,7 +725,7 @@ debug hypothesis proposal — each of which only runs through `RADR_AGENT_CMD`.
 |---|---|
 | **M1** ✅ ([as built](docs/m1-plan.md#as-built-2026-10-07)) | TypeScript project skeleton, determinism utilities + property tests (§15), dependency budget + `--ignore-scripts` CI check, engagement folder, hash-chained event log, source snapshot (mirror + read-only worktree), Gate 1, fingerprint, host-mode toolchain (`tools install`, `doctor`, `db sync`), `census` / `lint` (baseline mode) / `secrets` / `sca` lanes for TS/JS + Python, SARIF normalization, findings + dispositions, no-LLM mode |
 | **M2** ✅ ([as built](docs/m2-plan.md#as-built-2026-10-07)) | `triage` tier + scorecard, rubric v1, Address report.md + PDF render, Gate 2, **build sandbox, then on top of it the `types` lane, `lint` project mode, and the `coverage` lane for TS/JS + Python** (recipe detection, `radr deps warm`, N-run stability), rubric auto-confirm + bulk disposition |
-| **M3** | Container image, remaining lanes (`sast`, `maint`, `history`, `license`, `iac`, `hygiene`), Go/Rust/JVM/PHP/Ruby/.NET packs **including their build recipes and coverage tools** |
+| **M3** ✅ ([as built](docs/m3-plan.md#as-built-2026-10-07)) | Container image, remaining lanes (`sast`, `maint`, `history`, `license`, `iac`, `hygiene`), Go/Rust/JVM/PHP/Ruby/.NET packs **including their build recipes**; coverage % for Go (Rust/JVM/PHP/Ruby/.NET run tests for pass/fail + stability; their coverage tools need per-project build config, deferred) |
 | **M4** | LLM lane (`triage`, drafting, judgment findings) with policy enforcement + evals |
 | **M5** | Debug workflow (reuses the M2 sandbox for repro and `git bisect run`) |
 | **M6** | `diff` tier (consultant-side, against a fork; §13), `verify` |

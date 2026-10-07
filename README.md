@@ -11,26 +11,35 @@
 - Re-running the same approved scope gives byte-identical findings, regardless of machine,
   timezone, or locale.
 
-See [PRD.md](PRD.md) for the full design and [docs/m1-plan.md](docs/m1-plan.md) for the
-current milestone.
+See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
+[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md).
 
-**Status: M2** covers Review and Address for TS/JS + Python:
-- the deterministic core and static lanes
-- a build sandbox for types and coverage
-- rubric v1, with EPSS/KEV exploitability promotion
-- a triage scorecard
-- the client report and remediation plan, Gate 2 sign-off, and a branded PDF
+**Status: M3.** Review and Address work for **TS/JS, Python, Go, Rust, JVM (Java/Kotlin),
+PHP, Ruby, and .NET**:
+- the deterministic core
+- static lanes:
+  - census, lint, secrets, dependencies + SBOM, history, tests
+  - SAST (Opengrep with a curated, fixture-tested rule pack)
+  - maintainability (complexity, duplication)
+  - licenses, IaC, repository hygiene
+- a build sandbox per stack for type checks, linters that need the toolchain, and tests
+  (coverage for TS/JS, Python, and Go)
+- **container mode:** every static lane runs in a locally built, checksum-verified
+  toolchain image with the network denied
+- rubric v1 with EPSS/KEV promotion, the triage scorecard, and the client report with its
+  remediation plan, Gate 2 sign-off, and a branded PDF
 
-The container toolchain image and other stacks (M3), the LLM lane (M4), Debug (M5), and
-PR review and verify (M6) are still to come.
+Still to come: the LLM lane (M4), Debug (M5), and PR review and verify (M6).
 
 ## Requirements
 
 - Node 22+ (24 LTS recommended; see `.nvmrc`)
 - git
 - macOS or Linux, on arm64 or x64
-- Optional: Podman (preferred) or Docker, for the sandboxed lanes (types, coverage, lint
-  project mode). Without one, static lanes still run and sandboxed lanes are skipped.
+- python3 on PATH (host mode: runs lizard for the maintainability lane)
+- Optional: Podman (preferred) or Docker, for the sandboxed lanes (types, coverage, the
+  stack linters, lint project mode) and for container mode. Without one, static lanes still
+  run in host mode and sandboxed lanes are skipped.
 
 ## Install
 
@@ -44,14 +53,15 @@ alias radr="node $PWD/bin/radr.js"
 
 ```bash
 # One-time, on a connected machine:
-radr tools install        # pinned, sha256-verified toolchain (+ sandbox images if Podman/Docker is up)
-radr db sync              # snapshot OSV (npm, PyPI), EPSS, and CISA KEV for offline scans
+radr tools install        # pinned, sha256-verified toolchain (+ node/python sandbox images if Podman/Docker is up)
+radr tools build-image    # optional: the container toolchain image (container mode; license and iac lanes)
+radr db sync              # snapshot OSV (8 ecosystems), EPSS, and CISA KEV for offline scans
 
 # Per engagement (export RADR_ENGAGEMENT=acme-health-2026q4 to drop the -e flags):
 radr init acme health-2026q4
 radr scope --source ~/forks/acme-app       # a fork/clone of the client repo; proposes lanes + build recipe
 $EDITOR ~/radr/engagements/acme-health-2026q4/engagement.yml   # review the scope and recipe
-radr deps warm                              # sandboxed lanes: cache dependencies (network)
+radr deps warm                              # sandboxed lanes: build/pull stack images, cache dependencies (network)
 radr scope                                  # pin the warmed cache
 radr approve scope                          # Gate 1: freezes the fingerprint
 radr review                                 # all lanes; routine findings auto-confirm (rubric v1)
@@ -71,6 +81,19 @@ secrets at HEAD only, and produces a one-page report.
 `-e` can be omitted if `RADR_ENGAGEMENT` is set, or if you run commands from inside the
 engagement folder.
 
+**Container mode** (`network: { mode: offline, enforcement: container }` in
+`engagement.yml`) runs every static lane in the toolchain image with `--network=none`. Host
+and container modes produce identical findings for the same scope (tested end to end).
+
+These lanes are opt-in:
+- **`license` and `iac`** need container mode, because ScanCode and Checkov live only in
+  the image.
+- **`hygiene`** (OpenSSF Scorecard, offline checks) can be added in either mode. It never
+  makes a run partial.
+
+`radr rules coverage` shows the SAST support bar per stack: every top-10 weakness target
+has a fixture-tested rule. The report's methodology section states the same.
+
 ## What radr guarantees
 
 | Guarantee | How it's enforced |
@@ -89,16 +112,18 @@ engagement folder.
 | Severity is never guessed | The rubric maps every (tool, severity) pair explicitly. Unmapped pairs refuse. |
 | Same scope, same findings | The findings-set hash is identical across homes, `TZ`, and `LANG` (tested end to end). |
 
-Static lanes run in host mode, where network isolation is **declared**, not enforced (sandboxed
-lanes are enforced offline). Enforced offline static lanes
-arrive with the container toolchain in M3.
+In host mode, static lanes' network isolation is **declared**, not enforced. Container mode
+enforces it (`--network=none`), and an end-to-end test proves a lane cannot reach the
+network. Sandboxed lanes are always enforced offline.
 
 ## Layout
 
 ```
 $RADR_HOME (default ~/radr)
 ├── tools/                       pinned toolchain (radr tools install)
+├── build/                       image build contexts (toolchain image, stack sandboxes)
 ├── snapshots/osv/<id>/          OSV DB snapshots (radr db sync)
+├── snapshots/deps/<engagement>/ warmed dependency caches (radr deps warm)
 └── engagements/<client>-<slug>/
     ├── engagement.yml           the scope (Gate 1)
     ├── events.jsonl             append-only, hash-chained authority
@@ -122,6 +147,11 @@ npm run lint                                   # includes the determinism guardr
 npm run check:deps                             # runtime dependency budget (≤ 8)
 UPDATE_GOLDEN=1 npm test                       # regenerate adapter goldens (review the diff!)
 node dist/scripts/pin-toolchain.js             # maintainers: re-pin toolchain/manifest.yml
+node dist/scripts/pin-images.js                # … sandbox base images (index digests)
+node dist/scripts/pin-sandbox-tools.js         # … tools baked into the stack sandbox images
+scripts/pin-rubocop.sh                         # … RuboCop's checksummed Gemfile.lock
+OPENGREP=<path> node dist/scripts/check-rules.js   # rule pack: provenance, licenses, every fixture
+RADR_E2E_TOOLS=/tmp/radr-tools RADR_E2E_SANDBOX=1 npm test   # + sandbox and container e2e (needs Podman/Docker)
 ```
 
 Install scripts are disabled everywhere (`.npmrc`). Adding a runtime dependency requires an
