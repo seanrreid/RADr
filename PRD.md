@@ -1,4 +1,4 @@
-# PRD: RAD Review — Review, Address, Debug
+# PRD: RAD Review — Read, Address, Debug
 
 **Status:** draft r2 (consistency pass 2026-10-07)
 **Owner:** Sean Reid (TorchCodeLab consulting)
@@ -26,7 +26,7 @@ Three phases:
 
 | Phase | Question it answers | Primary output |
 |---|---|---|
-| **Review** | What is true about this codebase? | Normalized, dispositioned `findings.jsonl` |
+| **Read** | What is true about this codebase? | Normalized, dispositioned `findings.jsonl` |
 | **Address** | What should the client do about it? | Client report (Markdown → PDF) + executable remediation plan |
 | **Debug** | Why is *this specific bug* happening? | Root-cause record with reproduction, bisect evidence, and regression test |
 
@@ -136,7 +136,7 @@ and **report template**.
  radr init  →  radr scope  →  radr approve scope   (fingerprint frozen)
                                      │
                                      ▼
- REVIEW      radr review     run pinned lanes → raw SARIF/JSON → normalize →
+ READ        radr review     run pinned lanes → raw SARIF/JSON → normalize →
                              dedupe → baseline-diff → findings.jsonl
              radr triage     (LLM lane, optional) cluster, explain, propose
                              dispositions + judgment findings → pending

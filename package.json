@@ -2,7 +2,7 @@
   "name": "@torchcodelab/radr",
   "version": "0.0.0",
   "private": true,
-  "description": "RAD Review: deterministic code review engagements (Review, Address, Debug)",
+  "description": "RAD Review: deterministic code review engagements (Read, Address, Debug)",
   "license": "MIT",
   "type": "module",
   "bin": {
