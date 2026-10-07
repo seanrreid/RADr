@@ -113,6 +113,33 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     for (const f of owned) assert.ok(!readFileSync(f).includes(FAKE_AWS_KEY_ID), `clear-text secret written to ${path.relative(engagement, f)}`);
   });
 
+  it("M2: address → Gate 2 → render produces a byte-identical PDF on every render (AC10–AC12)", async () => {
+    const env = { TZ: "UTC", LANG: "C" };
+    const { home } = await fullPipeline(fixture, env);
+    const ok = async (...args: string[]) => {
+      const r = await radr(home, env, ...args);
+      assert.equal(r.code, 0, `radr ${args.join(" ")}:\n${r.out}\n${r.err}`);
+      return r.out;
+    };
+    // Human decisions on everything the rubric left pending (the review set).
+    for (const lane of ["secrets", "sca", "lint"]) {
+      const r = await radr(home, env, "disposition", "--lane", lane, "confirmed", "--reason", "e2e: reviewed", "-e", "acme-e2e");
+      assert.ok(r.code === 0 || /matched no findings|can move/.test(r.err), r.err);
+    }
+    await ok("address", "-e", "acme-e2e");
+    const report = readFileSync(path.join(home, "engagements", "acme-e2e", "report", "report.md"), "utf8");
+    assert.match(report, /# Top risks/);
+    await ok("approve", "report", "-e", "acme-e2e");
+    const first = await ok("render", "-e", "acme-e2e");
+    const pdf = path.join(home, "engagements", "acme-e2e", "report", "report.pdf");
+    const bytes1 = readFileSync(pdf);
+    assert.equal(bytes1.subarray(0, 5).toString(), "%PDF-");
+    const second = await ok("render", "-e", "acme-e2e");
+    assert.equal(first, second, "same PDF hashes on a second render");
+    assert.ok(bytes1.equals(readFileSync(pdf)), "PDF bytes identical");
+    assert.ok(!bytes1.includes(FAKE_AWS_KEY_ID), "no clear-text secret in the PDF");
+  });
+
   it("produces identical findings-set hashes across homes, TZ, and LANG (AC18)", async () => {
     const a = await fullPipeline(fixture, { TZ: "UTC", LANG: "C" });
     const b = await fullPipeline(fixture, { TZ: "Asia/Kolkata", LANG: "de_DE.UTF-8" });

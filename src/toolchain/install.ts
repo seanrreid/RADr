@@ -63,9 +63,10 @@ export async function installTool(home: string, name: string, manifest: Manifest
   if (a.archive === "binary") {
     writeFileSync(path.join(staging, a.bin), data);
   } else {
-    const archive = path.join(staging, ".archive.tar.gz");
+    const archive = path.join(staging, `.archive.${a.archive}`);
     writeFileSync(archive, data);
-    const r = await run({ command: "tar", args: ["-xzf", archive, "-C", staging, "--no-same-owner"], cwd: staging, inheritEnv: ["PATH"] });
+    // `tar -xf` auto-detects gzip/xz; bsdtar (macOS) also extracts zip, which only macOS assets use.
+    const r = await run({ command: "tar", args: ["-xf", archive, "-C", staging, "--no-same-owner"], cwd: staging, inheritEnv: ["PATH"] });
     rmSync(archive);
     if (r.outcome !== "ok") throw new RefusedError(`${name}: extracting archive failed: ${r.stderr.toString().trim()}`);
   }

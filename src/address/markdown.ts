@@ -19,9 +19,14 @@ export function code(s: string): string {
   return `${fence}${pad}${flat}${pad}${fence}`;
 }
 
-export function table(header: readonly string[], rows: readonly (readonly string[])[]): string {
+/**
+ * Pipe table. `widths` (relative, e.g. [6, 8, 40]) become separator dash counts: pandoc sizes
+ * columns proportionally to them when cells are long, which keeps wide tables readable in the PDF.
+ */
+export function table(header: readonly string[], rows: readonly (readonly string[])[], widths?: readonly number[]): string {
   const line = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
-  return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
+  const sep = header.map((_, i) => "-".repeat(Math.max(3, widths?.[i] ?? 3)));
+  return [line(header), line(sep), ...rows.map(line)].join("\n");
 }
 
 const KEEP_START = /^<!-- radr:keep id=([a-z0-9-]+) -->$/;

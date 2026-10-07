@@ -12,14 +12,30 @@ import { stringify } from "yaml";
 
 export const PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"] as const;
 type Platform = (typeof PLATFORMS)[number];
+type PerPlatform<T> = Readonly<Record<Platform, T>>;
+
+/** sha256 per asset from the GitHub release API (`digest: "sha256:…"`), keyed by asset name. */
+async function apiDigests(repo: string, tag: string): Promise<Map<string, string>> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, { headers: { Accept: "application/vnd.github+json" } });
+  if (!res.ok) throw new Error(`GitHub API ${repo}@${tag}: ${res.status}`);
+  const rel = (await res.json()) as { assets: { name: string; digest?: string | null }[] };
+  const out = new Map<string, string>();
+  for (const a of rel.assets) {
+    const m = /^sha256:([0-9a-f]{64})$/.exec(a.digest ?? "");
+    if (m?.[1] !== undefined) out.set(a.name, m[1]);
+  }
+  return out;
+}
 
 interface ToolSpec {
   readonly repo: string;
   readonly tag: string;
   readonly version: string;
   readonly license: string;
+  /** Upstream checksum file name, or "github-api" to use the release API's per-asset sha256 digests
+   *  (for projects that publish no checksum file; recorded as such in the manifest). */
   readonly checksums: string;
-  readonly archive: "tar.gz" | "binary";
+  readonly archive: "tar.gz" | "tar.xz" | "zip" | "binary" | PerPlatform<"tar.gz" | "tar.xz" | "zip">;
   /** Release asset name per platform. */
   readonly assets: Readonly<Record<Platform, string>>;
   /** Path of the executable inside the archive (or the file name for raw binaries). */
@@ -50,6 +66,20 @@ const SPECS: Readonly<Record<string, ToolSpec>> = {
     assets: { "darwin-arm64": "syft_1.54.1_darwin_arm64.tar.gz", "darwin-x64": "syft_1.54.1_darwin_amd64.tar.gz", "linux-arm64": "syft_1.54.1_linux_arm64.tar.gz", "linux-x64": "syft_1.54.1_linux_amd64.tar.gz" },
     bin: () => "syft", versionArgs: ["version"], versionPattern: "Version:\\s+([0-9.]+)",
   },
+  // Report rendering (M2): pandoc publishes no checksum file, Typst neither; both use GitHub's
+  // per-asset digests. pandoc is GPL-2.0+ and is only ever invoked as a separate process.
+  pandoc: {
+    repo: "jgm/pandoc", tag: "3.12", version: "3.12", license: "GPL-2.0-or-later", checksums: "github-api",
+    archive: { "darwin-arm64": "zip", "darwin-x64": "zip", "linux-arm64": "tar.gz", "linux-x64": "tar.gz" },
+    assets: { "darwin-arm64": "pandoc-3.12-arm64-macOS.zip", "darwin-x64": "pandoc-3.12-x86_64-macOS.zip", "linux-arm64": "pandoc-3.12-linux-arm64.tar.gz", "linux-x64": "pandoc-3.12-linux-amd64.tar.gz" },
+    bin: (asset) => (asset.endsWith(".zip") ? `${asset.replace(/-macOS\.zip$/, "")}/bin/pandoc` : "pandoc-3.12/bin/pandoc"),
+    versionArgs: ["--version"], versionPattern: "pandoc ([0-9.]+)",
+  },
+  typst: {
+    repo: "typst/typst", tag: "v0.15.1", version: "0.15.1", license: "Apache-2.0", checksums: "github-api", archive: "tar.xz",
+    assets: { "darwin-arm64": "typst-aarch64-apple-darwin.tar.xz", "darwin-x64": "typst-x86_64-apple-darwin.tar.xz", "linux-arm64": "typst-aarch64-unknown-linux-musl.tar.xz", "linux-x64": "typst-x86_64-unknown-linux-musl.tar.xz" },
+    bin: (asset) => `${asset.replace(/\.tar\.xz$/, "")}/typst`, versionArgs: ["--version"], versionPattern: "typst ([0-9.]+)",
+  },
   ruff: {
     repo: "astral-sh/ruff", tag: "0.16.10", version: "0.16.10", license: "MIT", checksums: "sha256.sum", archive: "tar.gz",
     assets: { "darwin-arm64": "ruff-aarch64-apple-darwin.tar.gz", "darwin-x64": "ruff-x86_64-apple-darwin.tar.gz", "linux-arm64": "ruff-aarch64-unknown-linux-musl.tar.gz", "linux-x64": "ruff-x86_64-unknown-linux-musl.tar.gz" },
@@ -77,16 +107,16 @@ async function main(): Promise<void> {
   const tools: Record<string, unknown> = {};
   for (const [name, spec] of Object.entries(SPECS)) {
     const base = `https://github.com/${spec.repo}/releases/download/${spec.tag}`;
-    const sums = parseChecksums(await fetchText(`${base}/${spec.checksums}`));
+    const sums = spec.checksums === "github-api" ? await apiDigests(spec.repo, spec.tag) : parseChecksums(await fetchText(`${base}/${spec.checksums}`));
     const platforms: Record<string, unknown> = {};
     for (const p of PLATFORMS) {
       const asset = spec.assets[p];
       const sha256 = sums.get(asset);
       if (sha256 === undefined) throw new Error(`${name}: no checksum for ${asset} in ${spec.checksums}`);
-      platforms[p] = { url: `${base}/${asset}`, sha256, archive: spec.archive, bin: spec.bin(asset) };
+      platforms[p] = { url: `${base}/${asset}`, sha256, archive: typeof spec.archive === "string" ? spec.archive : spec.archive[p], bin: spec.bin(asset) };
     }
     tools[name] = {
-      version: spec.version, license: spec.license, source: `https://github.com/${spec.repo}`, checksums_from: `${base}/${spec.checksums}`,
+      version: spec.version, license: spec.license, source: `https://github.com/${spec.repo}`, checksums_from: spec.checksums === "github-api" ? `https://api.github.com/repos/${spec.repo}/releases/tags/${spec.tag} (asset digests)` : `${base}/${spec.checksums}`,
       version_args: spec.versionArgs, version_pattern: spec.versionPattern, platforms,
     };
     process.stdout.write(`pinned ${name} ${spec.version}\n`);

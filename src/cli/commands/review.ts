@@ -13,6 +13,7 @@ import { review as runReview } from "../../review/run.js";
 import { computeScorecard } from "../../address/scorecard.js";
 import { loadRunInputs } from "../../address/inputs.js";
 import { writeAddress } from "../../address/report.js";
+import { render } from "../../address/render.js";
 import { EventLog } from "../../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../../state/fingerprint.js";
 import { Gates } from "../../state/gates.js";
@@ -215,5 +216,18 @@ export const address: CommandSpec = {
     ctx.out(`report: ${r.paths.report}`);
     ctx.out(`plan:   ${r.paths.remediation} (${String(r.items)} work items)`);
     ctx.out(`edit the keep-blocks (executive summary, recommendations, plan notes), then: radr approve report -e ${l.id}`);
+  },
+};
+
+export const renderCmd: CommandSpec = {
+  name: "render",
+  usage: "radr render [-e <id>]",
+  summary: "PDF of the approved report and plan (requires Gate 2)",
+  async run(args, ctx) {
+    const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
+    const home = radrHome(ctx.env);
+    const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+    const r = await render(home, l, ctx.clock);
+    for (const p of r.pdfs) ctx.out(`${p.path}\n  ${p.hash}`);
   },
 };

@@ -118,6 +118,64 @@ tools:
         sha256: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
         archive: tar.gz
         bin: syft
+  pandoc:
+    version: "3.12"
+    license: GPL-2.0-or-later
+    source: https://github.com/jgm/pandoc
+    checksums_from: https://api.github.com/repos/jgm/pandoc/releases/tags/3.12 (asset digests)
+    version_args:
+      - --version
+    version_pattern: pandoc ([0-9.]+)
+    platforms:
+      darwin-arm64:
+        url: https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-arm64-macOS.zip
+        sha256: f148ca09c9f36594db527a9fc988ad736290ce428f79594c50208cd1ec58b3c0
+        archive: zip
+        bin: pandoc-3.12-arm64/bin/pandoc
+      darwin-x64:
+        url: https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-x86_64-macOS.zip
+        sha256: 18577f9460c3dc5d2651ad3bab37d513bc2034a5a777fbe18fa0a5acf2e936ea
+        archive: zip
+        bin: pandoc-3.12-x86_64/bin/pandoc
+      linux-arm64:
+        url: https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-linux-arm64.tar.gz
+        sha256: 6cefcf7100e23a99447c26f89d1ff5b253f3407fcef99a9e27ae06f3ed16cb82
+        archive: tar.gz
+        bin: pandoc-3.12/bin/pandoc
+      linux-x64:
+        url: https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-linux-amd64.tar.gz
+        sha256: 67d7d011fed8c8543306022b985b9b2499ab9b74818df91d8727c7e9ebc5ba06
+        archive: tar.gz
+        bin: pandoc-3.12/bin/pandoc
+  typst:
+    version: 0.15.1
+    license: Apache-2.0
+    source: https://github.com/typst/typst
+    checksums_from: https://api.github.com/repos/typst/typst/releases/tags/v0.15.1 (asset digests)
+    version_args:
+      - --version
+    version_pattern: typst ([0-9.]+)
+    platforms:
+      darwin-arm64:
+        url: https://github.com/typst/typst/releases/download/v0.15.1/typst-aarch64-apple-darwin.tar.xz
+        sha256: 48f62ed034aa3a7978309579ac6ca00045e2ef0da73114e8af27cfd8e74dc05a
+        archive: tar.xz
+        bin: typst-aarch64-apple-darwin/typst
+      darwin-x64:
+        url: https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-apple-darwin.tar.xz
+        sha256: 7f9fdd9584866245de9a79e0add8f9236fae6f40a8a45e2c4771ccc14db4e0fa
+        archive: tar.xz
+        bin: typst-x86_64-apple-darwin/typst
+      linux-arm64:
+        url: https://github.com/typst/typst/releases/download/v0.15.1/typst-aarch64-unknown-linux-musl.tar.xz
+        sha256: 5aa8d74a3d906e60ea12a66ac2f37f8eef1b14cbad7182a745e393a10c23dcee
+        archive: tar.xz
+        bin: typst-aarch64-unknown-linux-musl/typst
+      linux-x64:
+        url: https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz
+        sha256: a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c
+        archive: tar.xz
+        bin: typst-x86_64-unknown-linux-musl/typst
   ruff:
     version: 0.16.10
     license: MIT

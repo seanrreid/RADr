@@ -140,3 +140,11 @@ describe("radr address + approve report (AC10, AC11)", () => {
     assert.match(String(ev?.data["accepted_partial"]), /ruff crashed/);
   });
 });
+
+describe("render (unit)", () => {
+  it("derives the PDF timestamp from the document date, never the wall clock", async () => {
+    const { epochOf } = await import("../../src/address/render.js");
+    assert.equal(epochOf("2026-10-07"), 1791331200);
+    assert.throws(() => epochOf("10/07/2026"), /invalid document date/);
+  });
+});

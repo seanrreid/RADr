@@ -11,7 +11,7 @@ export type Platform = (typeof PLATFORMS)[number];
 export interface PlatformAsset {
   readonly url: string;
   readonly sha256: string;
-  readonly archive: "tar.gz" | "binary";
+  readonly archive: "tar.gz" | "tar.xz" | "zip" | "binary";
   readonly bin: string;
 }
 
@@ -37,7 +37,7 @@ const asset = {
   properties: {
     url: { type: "string", pattern: "^https://github\\.com/" },
     sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    archive: { enum: ["tar.gz", "binary"] },
+    archive: { enum: ["tar.gz", "tar.xz", "zip", "binary"] },
     bin: { type: "string", pattern: "^[A-Za-z0-9._/-]+$", not: { pattern: "(^/|\\.\\.)" } },
   },
 };

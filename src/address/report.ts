@@ -62,7 +62,7 @@ function scorecardSection(card: Scorecard): string {
   return [
     `**Overall: ${VERDICT_LABEL[card.verdict] ?? card.verdict}**`,
     "",
-    table(["Area", "Result", "Value"], card.rows.map((r) => [esc(r.label), RATING_LABEL[r.rating] ?? r.rating, r.value === null ? "—" : esc(String(r.value))])),
+    table(["Area", "Result", "Value"], card.rows.map((r) => [esc(r.label), RATING_LABEL[r.rating] ?? r.rating, r.value === null ? "—" : esc(String(r.value))]), [50, 14, 36]),
   ].join("\n");
 }
 
@@ -78,7 +78,7 @@ function findingsByCategory(inp: RunInputs): string {
   if (cats.length === 0) return "No open findings.";
   return cats.map((c) => {
     const rows = bySeverity(fs.filter((f) => f.category === c)).map((f) => [f.id, f.severity, esc(state(inp, f)), code(`${f.tool}/${f.rule_id}`), code(loc(f)), esc(f.message)]);
-    return [`### ${CATEGORY_TITLES[c] ?? esc(c)}`, "", table(["ID", "Severity", "State", "Rule", "Location", "Finding"], rows)].join("\n");
+    return [`### ${CATEGORY_TITLES[c] ?? esc(c)}`, "", table(["ID", "Severity", "State", "Rule", "Location", "Finding"], rows, [8, 9, 10, 22, 19, 32])].join("\n");
   }).join("\n\n");
 }
 
@@ -119,14 +119,14 @@ function methodology(inp: RunInputs, l: Layout): string {
   ];
   if (inp.notes.length > 0) lines.push("", "**Gaps**", "", ...inp.notes.map((n) => `- ${esc(n)}`));
   if (defs !== undefined) {
-    lines.push("", "**Severity definitions**", "", table(["Severity", "Meaning"], [...SEVERITIES].reverse().map((s: Severity) => [s, esc(defs[s])])));
+    lines.push("", "**Severity definitions**", "", table(["Severity", "Meaning"], [...SEVERITIES].reverse().map((s: Severity) => [s, esc(defs[s])]), [14, 86]));
   }
   return lines.join("\n");
 }
 
 function appendix(inp: RunInputs): string {
   const rows = bySeverity(inp.findings).map((f) => [f.id, f.severity, esc(state(inp, f)), code(`${f.tool}/${f.rule_id}`), code(loc(f))]);
-  return rows.length === 0 ? "No findings." : table(["ID", "Severity", "State", "Rule", "Location"], rows);
+  return rows.length === 0 ? "No findings." : table(["ID", "Severity", "State", "Rule", "Location"], rows, [10, 12, 12, 34, 32]);
 }
 
 function planSummary(waves: readonly PlanWave[]): string {

@@ -19,6 +19,8 @@ const VERSION_OUTPUT: Readonly<Record<string, (v: string) => string>> = {
   "osv-scanner": (v) => `osv-scanner version: ${v}\ncommit: n/a`,
   syft: (v) => `Application:   syft\nVersion:       ${v}`,
   ruff: (v) => `ruff ${v}`,
+  pandoc: (v) => `pandoc ${v}\nFeatures: +server +lua`,
+  typst: (v) => `typst ${v} (abcdef12)`,
 };
 
 /** Default behaviors: valid, empty results in each tool's real output format. */
