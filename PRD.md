@@ -420,7 +420,7 @@ Vetting notes and sources: Appendix A (checked 2026-10-07; re-verify at pin time
 |---|---|---|---|
 | `census` | scc | — | LOC, languages, COCOMO-free |
 | `lint` | eslint (TS/JS), ruff (Py), golangci-lint (Go), clippy (Rust), PMD / detekt (JVM), PHPStan (PHP), RuboCop (Ruby), NetAnalyzers (.NET) | Biome, staticcheck, Checkstyle, ktlint, Roslynator | Two modes. **Baseline:** radr's own pinned configs, no client deps, comparable across engagements. **Project:** the client's own config and plugins, run in the sandbox. Findings are tagged with their mode. |
-| `types` | tsc, pyright | mypy, PHPStan levels | Needs deps installed → sandboxed build |
+| `types` | tsc (client's own, else pinned), mypy (pinned) | pyright, PHPStan levels | Needs deps installed → sandboxed build (mypy chosen over pyright in M2: installs with pip in the Python sandbox) |
 | `sast` | **Opengrep** + curated rule pack; bandit, gosec, SpotBugs + FindSecBugs, Psalm taint, NetAnalyzers CA security rules | Semgrep CE (fetched rules only, see §14.2) | CodeQL and Brakeman are **client-licensed plug-ins only** |
 | `secrets` | gitleaks (HEAD in `triage`; **full history in `standard`/`deep`**; the PR's commit range in `diff`) | Betterleaks (planned successor), TruffleHog **with `--no-verification` only** | Live verification is forbidden. No commit or time bound on history: the timeout exists only as a safety net, and hitting it is a `partial` outcome that blocks Gate 2 unless `--accept-partial` is used |
 | `sca` | osv-scanner v2 (`--offline`, snapshotted DB) + syft SBOM | grype (second opinion), cargo-audit, govulncheck, bundler-audit | npm/pip/composer/dotnet auditors are network-mode only |
@@ -723,8 +723,8 @@ debug hypothesis proposal — each of which only runs through `RADR_AGENT_CMD`.
 
 | M | Scope |
 |---|---|
-| **M1** | TypeScript project skeleton, determinism utilities + property tests (§15), dependency budget + `--ignore-scripts` CI check, engagement folder, hash-chained event log, source snapshot (mirror + read-only worktree), Gate 1, fingerprint, host-mode toolchain (`tools install`, `doctor`, `db sync`), `census` / `lint` (baseline mode) / `secrets` / `sca` lanes for TS/JS + Python, SARIF normalization, findings + dispositions, no-LLM mode |
-| **M2** | `triage` tier + scorecard, rubric v1, Address report.md + PDF render, Gate 2, **build sandbox, then on top of it the `types` lane, `lint` project mode, and the `coverage` lane for TS/JS + Python** (recipe detection, `radr deps warm`, N-run stability), rubric auto-confirm + bulk disposition |
+| **M1** ✅ ([as built](docs/m1-plan.md#as-built-2026-10-07)) | TypeScript project skeleton, determinism utilities + property tests (§15), dependency budget + `--ignore-scripts` CI check, engagement folder, hash-chained event log, source snapshot (mirror + read-only worktree), Gate 1, fingerprint, host-mode toolchain (`tools install`, `doctor`, `db sync`), `census` / `lint` (baseline mode) / `secrets` / `sca` lanes for TS/JS + Python, SARIF normalization, findings + dispositions, no-LLM mode |
+| **M2** ✅ ([as built](docs/m2-plan.md#as-built-2026-10-07)) | `triage` tier + scorecard, rubric v1, Address report.md + PDF render, Gate 2, **build sandbox, then on top of it the `types` lane, `lint` project mode, and the `coverage` lane for TS/JS + Python** (recipe detection, `radr deps warm`, N-run stability), rubric auto-confirm + bulk disposition |
 | **M3** | Container image, remaining lanes (`sast`, `maint`, `history`, `license`, `iac`, `hygiene`), Go/Rust/JVM/PHP/Ruby/.NET packs **including their build recipes and coverage tools** |
 | **M4** | LLM lane (`triage`, drafting, judgment findings) with policy enforcement + evals |
 | **M5** | Debug workflow (reuses the M2 sandbox for repro and `git bisect run`) |

@@ -1,6 +1,6 @@
 # M2 Plan: Triage, sandbox, Address, Gate 2, PDF
 
-**Status:** in progress
+**Status:** implemented (2026-10-07). See "As built" at the end.
 **Source:** [PRD.md](../PRD.md) §19 (M2), §5 (tiers), §8 (dispositions), §10 (severity), §12 (Address), §14.1a (sandbox)
 **Builds on:** [M1](m1-plan.md) (as built)
 **Date:** 2026-10-07
@@ -118,3 +118,71 @@ and `verify` (M6).
 - **W5 — PDF:** pin pandoc + Typst (asset digests from the GitHub release API, recorded as
   such); tar.xz/zip install support; the TorchCodeLab theme; `render`.
 - **W6 — E2E + docs:** AC13; determinism of report and PDF bytes; README and plan "As built".
+
+---
+
+## As built (2026-10-07)
+
+### Verification
+
+- 170 tests pass on macOS arm64. That includes the real-tools e2e (M1 pipeline plus
+  address → approve → render with byte-identical PDFs) and the real-Podman sandbox e2e
+  (offline types + stable coverage for both stacks).
+- A triage engagement on the M1 fixture runs end to end: HEAD-only secrets, the scorecard,
+  and a 3-page PDF.
+- **Linux arm64** (Node 24.21 container): real toolchain incl. pandoc/Typst installs and passes
+  `doctor`; all 170 tests pass incl. the real-tools e2e with PDF render; lint clean. The
+  sandbox e2e needs a runtime inside the container, so it is covered by macOS/Podman here and
+  by CI on ubuntu (Docker). Linux x64 and CI: pending a remote.
+
+### Acceptance criteria
+
+| AC | Where |
+|---|---|
+| AC1 rubric v1 | `rubric/v1.yml`, `src/rubric/rubric.ts`; boundaries in `test/unit/rubric-v1.test.ts` |
+| AC2 EPSS/KEV | `src/toolchain/vulnctx.ts` (string-arithmetic basis points, content-addressed, fail-open notes) |
+| AC3 auto-confirm | runner `applyAutoConfirm`; actor `rubric@v1`; never the review set |
+| AC4 bulk disposition | `radr disposition --rule/--category/--lane/--path … --reason` |
+| AC5 history | `src/lanes/metrics.ts` (window anchored to the approved commit's date) |
+| AC6 triage + scorecard | fixed lane set, `src/address/scorecard.ts`, `radr scorecard` |
+| AC7 sandbox isolation | `src/sandbox/runtime.ts`; flags pinned by unit tests; real Podman e2e |
+| AC8 deps warm | `src/sandbox/deps.ts`; offline installs from the pinned cache |
+| AC9 coverage stability | N=2 runs, identical exit codes + coverage hashes ⇒ stable |
+| AC10 address | `src/address/report.ts` + `plan.ts`; byte-identical regeneration; keep-blocks |
+| AC11 Gate 2 | `src/address/gate2.ts` |
+| AC12 render | `src/address/render.ts`; `themes/torchcodelab/` |
+| AC13 e2e | `test/e2e/pipeline.test.ts`, `test/e2e/sandbox.test.ts` |
+
+### Deviations from this plan
+
+| Plan | As built | Why |
+|---|---|---|
+| pyright for Python types | **mypy** (pinned; installed from the dependency cache) | The Python sandbox image has no Node; mypy installs with pip. pyright also pulled in an install script |
+| Flaky tests listed individually | Suite-level `unstable-results` finding (exit codes + coverage hashes differ across 2 runs) | Per-test pass/fail sets need a runner-specific reporter for each stack; deferred |
+| `coverage` in auto-confirm | Removed | A failing or flaky suite needs a person's eyes |
+| Gate 2 freezes findings/report/plan/theme | Also freezes a **dispositions hash** | Without it, a report generated before a decision could be signed off with stale states |
+| — | Event schemas are **additive-only** | Making a new field required made an existing valid log unreadable |
+| — | Findings are **re-assessed every run** (stable ids, latest record wins) | A rubric change previously left stale severities |
+
+### Findings from building against the real tools
+
+1. **Read-only worktree inside the sandbox:** `cp -R` preserves modes, so the scratch copy
+   was read-only (`EACCES` on `node_modules`). The scratch copy is now `chmod -R u+w`; `/src`
+   stays read-only.
+2. **c8 argument parsing** swallowed `sh` as a flag value. c8's options now end with `--`.
+3. **LCOV** dropped `node_modules` only at the top level. It's now dropped at any depth.
+4. **gitleaks `dir` mode** (triage) embeds the **absolute** path in its fingerprint, which
+   would break cross-home determinism. Fingerprints are now rebuilt from repo-relative paths.
+5. **EPSS** "current" redirects to a dated file. The published score date is read from the
+   file itself.
+6. **The YAML library** emitted anchors/aliases for repeated values, which radr's strict
+   parser rejects. Aliasing is now disabled on every writer.
+7. **pandoc** wraps tables in non-breaking Typst figures and centers cells. The theme makes
+   them breakable and left-aligned. Column widths come from pipe-table separators.
+
+### Open items carried forward
+
+- Per-test flaky detection (JUnit-style reporters per stack).
+- Coverage includes Python test files (coverage.py's default); consider `--omit` for tests.
+- The report's Recommendations section can start on a new page with space left above
+  (Typst flow); cosmetic.
