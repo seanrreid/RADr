@@ -1,0 +1,2 @@
+/tmp/work/net-svc/Token.cs(11,55): warning CA5394: Random is an insecure random number generator. Use cryptographically secure random number generators when randomness is required for security. (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca5394) [/tmp/work/net-svc/Svc.csproj]
+  Svc -> /tmp/work/net-svc/bin/Debug/net8.0/Svc.dll

@@ -4,3 +4,4 @@ coverage/
 .DS_Store
 *.log
 .radr-test/
+!test/golden/**/*.log
