@@ -1,0 +1,178 @@
+# rules/targets.yml — per-stack CWE target list for the curated Opengrep pack.
+# Status: DRAFT (2026-10-07). See PRD §14.2 (strategy, support bar) and Appendix B (seed sources).
+#
+# Source list: MITRE 2025 CWE Top 25 (published 2025-12-15),
+#   https://cwe.mitre.org/top25/archive/2025/2025_cwe_top25.html
+# plus supplements (marked `supplement: true`) for weaknesses that are not on the Top 25
+# but are high-signal and statically detectable in a given stack.
+#
+# Every Top 25 entry is classified by HOW RAD Review detects it. Only `sast` entries can count
+# toward a stack's top-10 support bar. Everything else is covered elsewhere, and the
+# methodology section of each report says where.
+
+version: 1
+top25_edition: "2025"
+
+# --- Classification of the 2025 Top 25 ------------------------------------------------------
+top25:
+  - { rank: 1,  cwe: 79,  name: "Cross-site Scripting",                     detect: sast }
+  - { rank: 2,  cwe: 89,  name: "SQL Injection",                            detect: sast }
+  - { rank: 3,  cwe: 352, name: "CSRF",                                     detect: sast, note: "framework config: protection disabled/exempted" }
+  - { rank: 4,  cwe: 862, name: "Missing Authorization",                    detect: judgment }
+  - { rank: 5,  cwe: 787, name: "Out-of-bounds Write",                      detect: memory-safety }
+  - { rank: 6,  cwe: 22,  name: "Path Traversal",                           detect: sast }
+  - { rank: 7,  cwe: 416, name: "Use After Free",                           detect: memory-safety }
+  - { rank: 8,  cwe: 125, name: "Out-of-bounds Read",                       detect: memory-safety }
+  - { rank: 9,  cwe: 78,  name: "OS Command Injection",                     detect: sast }
+  - { rank: 10, cwe: 94,  name: "Code Injection",                           detect: sast }
+  - { rank: 11, cwe: 120, name: "Classic Buffer Overflow",                  detect: memory-safety }
+  - { rank: 12, cwe: 434, name: "Unrestricted File Upload",                 detect: sast, note: "partial: upload handlers without type/extension checks" }
+  - { rank: 13, cwe: 476, name: "NULL Pointer Dereference",                 detect: types, note: "typecheckers/linters (strict null checks, nilaway-style)" }
+  - { rank: 14, cwe: 121, name: "Stack-based Buffer Overflow",              detect: memory-safety }
+  - { rank: 15, cwe: 502, name: "Deserialization of Untrusted Data",        detect: sast }
+  - { rank: 16, cwe: 122, name: "Heap-based Buffer Overflow",               detect: memory-safety }
+  - { rank: 17, cwe: 863, name: "Incorrect Authorization",                  detect: judgment }
+  - { rank: 18, cwe: 20,  name: "Improper Input Validation",                detect: none, note: "too broad to target; covered via its specific children" }
+  - { rank: 19, cwe: 284, name: "Improper Access Control",                  detect: judgment }
+  - { rank: 20, cwe: 200, name: "Sensitive Information Exposure",           detect: sast, note: "partial: debug mode, stack traces, verbose errors; secrets lane covers credentials" }
+  - { rank: 21, cwe: 306, name: "Missing Authentication for Critical Function", detect: judgment }
+  - { rank: 22, cwe: 918, name: "SSRF",                                     detect: sast }
+  - { rank: 23, cwe: 77,  name: "Command Injection",                        detect: sast, note: "targeted via CWE-78 and stack-specific variants" }
+  - { rank: 24, cwe: 639, name: "Authorization Bypass via User-Controlled Key (IDOR)", detect: judgment }
+  - { rank: 25, cwe: 770, name: "Allocation Without Limits",                detect: sast, note: "partial: missing timeouts/size limits" }
+
+# detect values:
+#   sast          — Opengrep rule pack + per-language SAST tools; counts toward the support bar
+#   judgment      — authz/authn family. Pattern rules can't establish that a check is MISSING
+#                   for a given route and data model, so this goes to the judgment lane (M4) and the
+#                   consultant's review checklist. Findings are `class: judgment`.
+#   memory-safety — relevant only to Rust `unsafe` (and future C/C++). Targeted via the Rust
+#                   "unsafe" group below, plus clippy.
+#   types         — typecheck/lint lanes
+#   none          — not targeted directly
+
+# Not in the 2025 Top 25, but covered by other lanes:
+#   CWE-798 hard-coded credentials → `secrets` lane (gitleaks), all stacks.
+#   CWE-1104 unmaintained third-party components, CWE-1395 vulnerable deps → `sca` lane.
+
+# --- Per-stack top-10 SAST targets (the support bar) -----------------------------------------
+# A stack's `sast` lane is "supported" when every target below has ≥1 rule with passing
+# positive/negative fixtures. Otherwise the report labels the lane "partial" and lists the gaps.
+# seed: where Appendix B suggests seed rules exist ("author" = we write them).
+
+stacks:
+  typescript-javascript:
+    targets:
+      - { cwe: 79,   focus: "React dangerouslySetInnerHTML, DOM sinks, Express res.send of input", seed: [gitlab-mit, lgpl] }
+      - { cwe: 89,   focus: "raw SQL via string concat/template (pg, mysql2, knex.raw, Prisma $queryRawUnsafe)", seed: [gitlab-mit, elttam, lgpl] }
+      - { cwe: 943,  focus: "NoSQL injection (Mongo $where, operator injection)", seed: [lgpl], supplement: true }
+      - { cwe: 22,   focus: "fs.* / res.sendFile with request-derived paths", seed: [lgpl] }
+      - { cwe: 78,   focus: "child_process exec/execSync with input, shell: true", seed: [gitlab-mit, lgpl] }
+      - { cwe: 94,   focus: "eval, new Function, vm.runIn*, setTimeout(string)", seed: [gitlab-mit, lgpl] }
+      - { cwe: 918,  focus: "fetch/axios/got with request-derived URL", seed: [lgpl] }
+      - { cwe: 1321, focus: "prototype pollution (merge/set by user key)", seed: [lgpl], supplement: true }
+      - { cwe: 601,  focus: "open redirect (res.redirect, Next.js redirect)", seed: [lgpl], supplement: true }
+      - { cwe: 1333, focus: "ReDoS: catastrophic-backtracking regex on input", seed: [author], supplement: true }
+
+  python:
+    targets:
+      - { cwe: 89,   focus: "cursor.execute with f-string/%/concat; Django raw/extra; SQLAlchemy text()", seed: [gitlab-mit] }
+      - { cwe: 78,   focus: "subprocess shell=True, os.system, os.popen", seed: [gitlab-mit] }
+      - { cwe: 94,   focus: "eval/exec/compile on input", seed: [gitlab-mit] }
+      - { cwe: 502,  focus: "pickle/marshal/shelve loads, yaml.load without SafeLoader", seed: [gitlab-mit] }
+      - { cwe: 22,   focus: "open/send_file with request-derived paths; tarfile/zipfile extraction", seed: [gitlab-mit] }
+      - { cwe: 918,  focus: "requests/httpx/urllib with request-derived URL", seed: [author] }
+      - { cwe: 79,   focus: "Django mark_safe/|safe, Jinja2 autoescape=False, Flask Markup", seed: [gitlab-mit] }
+      - { cwe: 1336, focus: "SSTI: render_template_string / Template(input)", seed: [author], supplement: true }
+      - { cwe: 611,  focus: "XXE: lxml/xml.etree without defusedxml", seed: [gitlab-mit], supplement: true }
+      - { cwe: 295,  focus: "TLS verification disabled (verify=False, CERT_NONE)", seed: [gitlab-mit], supplement: true }
+
+  go:
+    targets:
+      - { cwe: 89,   focus: "database/sql Query/Exec with fmt.Sprintf or concat", seed: [gitlab-apache] }
+      - { cwe: 78,   focus: "exec.Command with sh -c / input-built args", seed: [gitlab-apache] }
+      - { cwe: 22,   focus: "filepath.Join/os.Open with input; zip slip", seed: [gitlab-apache, elttam] }
+      - { cwe: 918,  focus: "http.Get/NewRequest with request-derived URL", seed: [author] }
+      - { cwe: 79,   focus: "text/template used for HTML; template.HTML(input)", seed: [gitlab-apache] }
+      - { cwe: 295,  focus: "InsecureSkipVerify: true", seed: [gitlab-apache] }
+      - { cwe: 327,  focus: "weak crypto: md5/sha1/des/rc4 for security purposes", seed: [gitlab-apache], supplement: true }
+      - { cwe: 338,  focus: "math/rand for tokens/keys", seed: [gitlab-apache], supplement: true }
+      - { cwe: 601,  focus: "http.Redirect with input", seed: [author], supplement: true }
+      - { cwe: 770,  focus: "http.Server without Read/Write timeouts; unbounded io.ReadAll", seed: [gitlab-apache] }
+
+  rust:
+    targets:
+      - { cwe: 119,  focus: "unsafe group (787/125/416/120): unsafe blocks, transmute, raw ptr deref, set_len, from_raw_parts — audit-flag rules", seed: [author], group: [787, 125, 416, 120, 121, 122] }
+      - { cwe: 89,   focus: "sqlx::query / diesel sql_query with format!", seed: [author] }
+      - { cwe: 78,   focus: "Command::new(\"sh\").arg(\"-c\") with input", seed: [author] }
+      - { cwe: 22,   focus: "Path::join / fs ops with input", seed: [author] }
+      - { cwe: 918,  focus: "reqwest/hyper with request-derived URL", seed: [author] }
+      - { cwe: 295,  focus: "danger_accept_invalid_certs / invalid hostnames", seed: [author], supplement: true }
+      - { cwe: 327,  focus: "weak hashes/ciphers for security purposes", seed: [author], supplement: true }
+      - { cwe: 338,  focus: "non-crypto RNG (rand::thread_rng is OK; SmallRng etc. for secrets is not)", seed: [author], supplement: true }
+      - { cwe: 190,  focus: "`as` narrowing casts / unchecked arithmetic on input-derived sizes", seed: [author], supplement: true }
+      - { cwe: 770,  focus: "unbounded deserialization/allocation (bincode without limits, Vec::with_capacity(input))", seed: [author] }
+
+  java-kotlin:
+    targets:
+      - { cwe: 89,   focus: "JDBC Statement concat, JPA createQuery concat, MyBatis ${}", seed: [gitlab-mit, elttam, lgpl] }
+      - { cwe: 78,   focus: "Runtime.exec / ProcessBuilder with input", seed: [gitlab-mit, lgpl] }
+      - { cwe: 22,   focus: "File/Paths with input; zip slip", seed: [gitlab-mit, lgpl] }
+      - { cwe: 502,  focus: "ObjectInputStream, XMLDecoder, Jackson default typing, SnakeYAML", seed: [gitlab-mit, elttam] }
+      - { cwe: 611,  focus: "XXE: DocumentBuilderFactory/SAXParser/XMLInputFactory defaults", seed: [gitlab-mit, lgpl], supplement: true }
+      - { cwe: 918,  focus: "URL/RestTemplate/WebClient with input", seed: [gitlab-mit, elttam] }
+      - { cwe: 79,   focus: "Servlet writer, JSP unescaped, Thymeleaf th:utext", seed: [gitlab-mit, lgpl] }
+      - { cwe: 94,   focus: "expression injection: SpEL/OGNL/EL (CWE-917), ScriptEngine.eval", seed: [gitlab-mit, elttam] }
+      - { cwe: 352,  focus: "Spring Security csrf().disable()", seed: [gitlab-mit] }
+      - { cwe: 327,  focus: "weak Cipher/MessageDigest algorithms, ECB mode", seed: [gitlab-mit, lgpl], supplement: true }
+
+  php:
+    targets:
+      - { cwe: 89,   focus: "mysqli/PDO query with concat; Laravel DB::raw/whereRaw", seed: [author] }
+      - { cwe: 79,   focus: "echo of input; Blade {!! !!}; Twig |raw", seed: [author] }
+      - { cwe: 78,   focus: "exec/system/shell_exec/passthru/backticks", seed: [federicodotta, author] }
+      - { cwe: 94,   focus: "eval, assert(string), create_function, preg_replace /e", seed: [author] }
+      - { cwe: 98,   focus: "include/require with input (file inclusion)", seed: [author], supplement: true }
+      - { cwe: 22,   focus: "file_get_contents/fopen with input", seed: [author] }
+      - { cwe: 502,  focus: "unserialize on input; phar:// wrappers", seed: [federicodotta, author] }
+      - { cwe: 434,  focus: "move_uploaded_file without type/extension validation", seed: [author] }
+      - { cwe: 918,  focus: "curl/file_get_contents with request-derived URL", seed: [author] }
+      - { cwe: 611,  focus: "XXE: libxml entity loading enabled", seed: [author], supplement: true }
+    note: "Psalm taint (MIT) carries PHP security until authored rules exist (Appendix B)."
+
+  ruby:
+    targets:
+      - { cwe: 89,   focus: "ActiveRecord where/order/find_by_sql with interpolation", seed: [author] }
+      - { cwe: 79,   focus: "html_safe, raw, <%== %>", seed: [author] }
+      - { cwe: 78,   focus: "system/exec/backticks/%x/Open3 with interpolation", seed: [author] }
+      - { cwe: 94,   focus: "eval/instance_eval/send/constantize on input (CWE-470 unsafe reflection)", seed: [author] }
+      - { cwe: 502,  focus: "Marshal.load, YAML.load (non-safe), Oj unsafe modes", seed: [author] }
+      - { cwe: 22,   focus: "File/send_file with params", seed: [author] }
+      - { cwe: 915,  focus: "mass assignment: permit!, attr_accessible gaps", seed: [author], supplement: true }
+      - { cwe: 601,  focus: "redirect_to params[...]", seed: [author], supplement: true }
+      - { cwe: 918,  focus: "Net::HTTP/open-uri/HTTParty with input", seed: [author] }
+      - { cwe: 352,  focus: "skip_forgery_protection / protect_from_forgery disabled", seed: [author] }
+    note: "No permissive Ruby rules exist (Appendix B). Brakeman runs when the client supplies a license (PRD §20 #8)."
+
+  csharp:
+    targets:
+      - { cwe: 89,   focus: "SqlCommand concat; EF FromSqlRaw/ExecuteSqlRaw with interpolation", seed: [gitlab-mit, elttam] }
+      - { cwe: 79,   focus: "Html.Raw, MarkupString, unencoded Response.Write", seed: [gitlab-mit] }
+      - { cwe: 78,   focus: "Process.Start with input", seed: [gitlab-mit] }
+      - { cwe: 22,   focus: "File/Path.Combine with input", seed: [gitlab-mit] }
+      - { cwe: 502,  focus: "BinaryFormatter, NetDataContractSerializer, Json.NET TypeNameHandling != None", seed: [gitlab-mit, elttam] }
+      - { cwe: 611,  focus: "XmlDocument/XmlReader with DTD processing enabled", seed: [gitlab-mit], supplement: true }
+      - { cwe: 918,  focus: "HttpClient with request-derived URL", seed: [author] }
+      - { cwe: 90,   focus: "LDAP injection (DirectorySearcher filter concat)", seed: [gitlab-mit], supplement: true }
+      - { cwe: 327,  focus: "MD5/SHA1/DES/RC2, ECB mode", seed: [gitlab-mit], supplement: true }
+      - { cwe: 352,  focus: "missing [ValidateAntiForgeryToken] / IgnoreAntiforgeryToken", seed: [author] }
+    note: "NetAnalyzers CA security rules run alongside (PRD §14)."
+
+# seed keys → Appendix B sources:
+#   gitlab-mit     GitLab sast-rules files with `License: MIT` header
+#   gitlab-apache  GitLab sast-rules Go files (gosec-derived, Apache-2.0)
+#   elttam         elttam/semgrep-rules (MIT)
+#   federicodotta  federicodotta/semgrep-rules (MIT, stale)
+#   lgpl           rules/lgpl sub-pack (LGPL-3.0, unmodified; pending counsel, PRD §20 #10)
+#   author         we write it
+# Seed tags are expected coverage, to be confirmed rule-by-rule when the pack is assembled.
