@@ -20,4 +20,12 @@ jobs:
       - run: npm run build
       - run: npm run lint
       - run: node dist/scripts/check-deps.js
-      - run: node --test "dist/test/**/*.test.js"
+      # Real pinned toolchain for the e2e suite (checksum-verified downloads).
+      - name: Install radr toolchain
+        run: node bin/radr.js tools install
+        env:
+          RADR_HOME: ${{ runner.temp }}/radr-tools
+      - name: Test (unit + real-tools e2e)
+        run: node --test "dist/test/**/*.test.js"
+        env:
+          RADR_E2E_TOOLS: ${{ runner.temp }}/radr-tools

@@ -1,6 +1,6 @@
 # M1 Plan: Deterministic core + first lanes
 
-**Status:** draft
+**Status:** implemented (2026-10-07). All 18 ACs pass on macOS arm64 and Linux arm64 (real-tools e2e included), with identical findings hashes across the two. **Linux x64 and CI not yet run** (no remote). See "As built" at the end.
 **Source:** [PRD.md](../PRD.md) §19 (M1), §15 (implementation), §7–§8 (gates, data model)
 **Date:** 2026-10-07
 
@@ -294,3 +294,51 @@ Tasks within a wave are independent. Each wave depends on the one before it.
 
 All 18 ACs pass in CI on macOS and Linux runners, and `radr findings --hash` matches
 across the T6.4 runs.
+
+---
+
+## As built (2026-10-07)
+
+### Verification
+
+- 128 tests pass locally (macOS arm64, Node 26), including the real-tools e2e
+  (`RADR_E2E_TOOLS`): AC17 (planted signals found, no clear-text secret on disk) and AC18
+  (identical findings-set hash across two homes, `TZ=UTC`/`LANG=C` vs.
+  `TZ=Asia/Kolkata`/`LANG=de_DE.UTF-8`).
+- **Linux arm64** (Debian bookworm container, Node 24.21 LTS, git 2.39): the real toolchain
+  installs checksum-verified, `doctor` passes, all 128 tests pass including the e2e, and lint
+  is clean.
+- **Cross-platform determinism:** the same fixture produces identical commit SHAs and an
+  identical findings-set hash
+  (`sha256:c26afd5b8f3cf3364f09e9f4a9fb41d57e5a046e82bdffe963a2b2402e9691a5`) on macOS arm64
+  (Node 26, git 2.49) and Linux arm64 (Node 24, git 2.39).
+- **Pending:** Linux x64 and CI. The workflow installs the real toolchain and runs the e2e
+  suite on `ubuntu-latest` (x64) and `macos-latest`, but it hasn't run yet because there's
+  no remote.
+
+### Deviations from this plan
+
+| Plan | As built | Why |
+|---|---|---|
+| T1.1: all JSON Schemas up front, in `schemas/*.json` | Schemas are TS modules next to their loaders (`src/schemas/events.ts`, config, matrix, rubric, manifest), added wave by wave | No runtime file lookups (keeps a single-executable build possible); each schema lands with the code that uses it |
+| T6.1: `scripts/make-fixture-repo.sh` | `test/helpers/fixture-repo.ts` | Portable and shares the exec wrapper; fixed identities/dates give identical SHAs on every machine (verified) |
+| T4.4: salted secret-match hashes for dedupe | gitleaks' own fingerprint (`commit:file:rule:line`) is the identity; no secret material is hashed | `--redact` means radr never holds the secret at all, which is stronger than holding a salted hash. The per-engagement salt is still created, for a future need |
+| T4.5 / PRD §14.5: SARIF as the interchange format | M1 adapters consume each tool's native JSON (eslint, ruff, gitleaks, osv-scanner, scc), golden-tested against real output | Native JSON carries more (OSV groups/aliases/max severity). SARIF *export* is still planned for the `diff` tier (M6) |
+| T4.1: drift → `version-drift` | A missing tool → `tool-missing`; changed binary/config/lock → `version-drift` (both abort) | The outcome tells the consultant what to fix |
+| Runner | A run is closed as `aborted` if the scope moves mid-run or the rubric refuses an unmapped severity | The plan didn't specify; leaving an open run would hide the failure |
+
+### Findings from building against the real tools
+
+1. **osv-scanner v2's offline DB layout** is `$OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY/osv-scalibr/<ecosystem>/all.zip`,
+   not `osv-scanner/…`. It was discovered by spiking (plan risk #1). A two-advisory
+   hand-built DB works, so tests never need the 218 MB npm DB.
+2. **macOS `/var` → `/private/var`:** tools report resolved paths, so lanes normalize against
+   the worktree's real path. The e2e test caught this; unit tests on an already-resolved
+   path couldn't.
+3. **ruff** can't combine `--config` with `--isolated`, but `--config` alone overrides
+   client `pyproject.toml` and nested `ruff.toml` (verified). Baseline mode really is
+   client-config-free.
+4. **syft's SPDX output** embeds a timestamp and a random document namespace, so the SBOM is
+   stored as an artifact and kept out of the findings-set hash.
+5. **gitleaks' report** includes commit author name/email. The adapter deliberately doesn't
+   copy them into findings.

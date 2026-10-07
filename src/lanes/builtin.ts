@@ -1,7 +1,7 @@
 // M1 lanes (T4.2–T4.5): census, lint (baseline mode), secrets, sca. Each runs pinned binaries
 // against the read-only worktree with a scrubbed environment and stores raw output untouched.
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { run, type ExecResult } from "../core/exec.js";
 import type { FindingDraft } from "../findings/types.js";
@@ -13,6 +13,14 @@ import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type LaneContext, t
 const OUTCOME_RANK: readonly LaneOutcome[] = ["tool-missing", "version-drift", "tool-error", "timeout", "output-cap", "parse-error", "success"];
 export function worstOutcome(outcomes: readonly LaneOutcome[]): LaneOutcome {
   return OUTCOME_RANK.find((o) => outcomes.includes(o)) ?? "success";
+}
+
+/**
+ * The worktree's REAL path. Tools report resolved paths (on macOS /var → /private/var), so
+ * normalizing against an unresolved root would make every in-repo path look like an escape.
+ */
+function realWorktree(ctx: LaneContext): string {
+  return realpathSync(ctx.layout.worktree);
 }
 
 function snippetReader(root: string): SnippetReader {
@@ -78,7 +86,7 @@ export const lint: Lane = {
   tools: ["ruff", "node-tools"],
   async run(ctx) {
     const steps = [];
-    const wt = ctx.layout.worktree;
+    const wt = realWorktree(ctx);
     const read = snippetReader(wt);
     if (ctx.doc.stacks.includes("typescript-javascript")) {
       const nt = ctx.tools.nodeTools;
@@ -111,7 +119,7 @@ export const secrets: Lane = {
     const sha = ctx.doc.source.sha;
     const dir = rawDir(ctx, "secrets");
     const report = path.join(dir, "gitleaks.json");
-    const wt = ctx.layout.worktree;
+    const wt = realWorktree(ctx);
     const r = await run({
       command: bin(ctx, "gitleaks"),
       args: ["git", `--log-opts=${sha}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
@@ -139,7 +147,7 @@ export const sca: Lane = {
   id: "sca",
   tools: ["osv-scanner", "syft"],
   async run(ctx) {
-    const wt = ctx.layout.worktree;
+    const wt = realWorktree(ctx);
     if (ctx.tools.osvDb === null) return { outcome: "tool-missing", tools: [], findings: [], detail: "no OSV snapshot pinned (snapshots.lock)" };
     const osv = await step(ctx, "sca", "osv-scanner", "osv-scanner.json",
       () => run({
