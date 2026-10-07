@@ -5,7 +5,7 @@ import path from "node:path";
 import { InternalError } from "../../src/core/errors.js";
 import type { Finding } from "../../src/findings/types.js";
 import { batchPrompts, promptFreeText, renderPrompt } from "../../src/llm/prompt.js";
-import { CONTEXT_LINES, MAX_SNIPPET_LINES, leakedRuns, promptFinding, quotes } from "../../src/llm/redact.js";
+import { CONTEXT_LINES, MAX_SNIPPET_LINES, leakedRuns, promptFinding, quotes, secretFiles } from "../../src/llm/redact.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const SRC = [
@@ -77,6 +77,16 @@ describe("promptFinding (PRD §9)", () => {
     assert.equal(p.message, "Tainted value req.query.id flows into db.execute(query)");
     const wide = promptFinding(finding({ line: 10, end_line: 80 }), "code-allowed", root);
     assert.equal(wide.code?.split("\n").length, MAX_SNIPPET_LINES);
+  });
+
+  it("code-allowed sends no code from a file the secrets lane flagged, even for other findings", () => {
+    const root = repo();
+    const secret = finding({ id: "F-0009", lane: "secrets", tool: "gitleaks", rule_id: "aws-secret", category: "secrets", file: "src/app.js", line: 50, end_line: 50 });
+    const sqli = finding({});
+    const noCode = secretFiles([sqli, secret]);
+    assert.deepEqual([...noCode], ["src/app.js"]);
+    assert.equal(promptFinding(sqli, "code-allowed", root, noCode).code, undefined);
+    assert.notEqual(promptFinding(sqli, "code-allowed", root).code, undefined);
   });
 
   it("secrets findings carry neither message nor code, under any policy", () => {

@@ -19,7 +19,7 @@ import { KEEP_DEFAULTS, addressPaths } from "../address/report.js";
 import { computeScorecard } from "../address/scorecard.js";
 import { invokeAgent, type AgentContext } from "./policy.js";
 import { renderPrompt } from "./prompt.js";
-import { promptFinding } from "./redact.js";
+import { promptFinding, secretFiles } from "./redact.js";
 
 export const DRAFT_MARKER = "<!-- radr:llm-draft -->";
 export const PURPOSE = "draft";
@@ -84,7 +84,7 @@ function draftData(inp: RunInputs, policy: "metadata-only" | "code-allowed", wor
       open_findings_by_category: count(open, (f) => f.category),
       waves: waves.map((w) => ({ wave: w.wave, focus: w.label, items: w.items.map((i) => ({ title: i.title, severity: i.severity, effort: i.effort, finding_ids: i.findings })) })),
     },
-    findings: [...top, ...judged].map((f) => promptFinding(f, policy, worktree)),
+    findings: [...top, ...judged].map((f) => promptFinding(f, policy, worktree, secretFiles(inp.findings))),
   };
 }
 

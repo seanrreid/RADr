@@ -1,6 +1,6 @@
 # M4 Plan: The LLM lane
 
-**Status:** approved 2026-10-07; in progress
+**Status:** complete (as built below)
 **Source:** [PRD.md](../PRD.md) §19 (M4), §9 (LLM boundary), §8 (data model), §17 invariants 2–5
 **Builds on:** [M3](m3-plan.md) (as built)
 **Date:** 2026-10-07
@@ -128,3 +128,65 @@ consultant.
 - **W4: Evals:** the invariant-5 adversarial fake agent, the ESLint import boundary, and
   the opt-in real-agent harness (AC6, AC11).
 - **W5: E2E, docs, and as-built.**
+
+## As built (2026-10-07)
+
+### Acceptance criteria
+
+| AC | Status | Evidence |
+|---|---|---|
+| AC1 three policies, fingerprinted, on the cover | ✅ | `parseEngagement`; `engagementHash` differs per policy (unit); methodology row |
+| AC2 off / unset: no spawn | ✅ | AC16 trap test now also runs `triage` and `address --draft`; gate unit tests |
+| AC3 metadata-only quotes no repo code | ✅ | unit (synthetic interpolated messages); real-tool e2e scans every prompt against the whole worktree; the planted AWS key is in no prompt, under `code-allowed` too |
+| AC4 prompts, responses, `llm-call` hashes | ✅ | `llm/L-NNNN.{prompt,response}.txt`; hashes asserted equal to the files |
+| AC5 `fail-protocol` → retry → partial | ✅ | matrix `llm` row; fake agent returning bad JSON and schema-invalid JSON |
+| AC6 no decision from agent output | ✅ | adversarial fake agent (invariant 5); ESLint boundary on `src/llm/**` + guardrail test |
+| AC7 `radr triage` annotations and proposals | ✅ | `llm/annotations.jsonl`; `[LLM]` lines in `radr findings` |
+| AC8 judgment anchors, `proposed`, Gate 2 | ✅ | `judgments.jsonl`; anchor rejection recorded; Gate 2 refuses `proposed`/`pending` judgments |
+| AC9 `--draft`, marker, Gate 2 | ✅ | untouched blocks only; drafts with markup rejected; Gate 2 refuses a marker |
+| AC10 LLM work labelled in the report | ✅ | "Judgment findings" section; provenance sentence and "AI (LLM) agent calls" row only when the LLM was used |
+| AC11 opt-in real-agent harness | ✅ (not yet run) | `test/e2e/agent.test.ts`, skipped unless `RADR_E2E_AGENT=1` |
+
+### Decisions made while building
+
+- **Rubric v2.** v1 says a published rubric is never edited (its hash is in the fingerprint),
+  so the judgment entry ships as `rubric/v2.yml` (v1 + `radr-judgment: { judgment: medium }`).
+  New scopes default to v2. Under v0/v1, triage still explains and clusters, and rejects
+  judgment proposals rather than giving them a default severity. The auto-confirm actor is now
+  `rubric@v2` for new engagements.
+- **Judgment findings live apart from tool findings** (`judgments.jsonl`, `J-NNNN` ids), so the
+  findings-set hash, which is the determinism proof, never depends on model output. The
+  dispositions hash covers judgments only when there are some, so earlier approvals still
+  verify.
+- **`severity-override` is for judgment findings only** in M4. Tool-finding severity stays
+  rubric-only.
+- **Agent wiring is agent-agnostic.** `RADR_AGENT_CMD` is a JSON argv array (or one executable
+  path); an argv element `{schema}` is replaced by the call's JSON Schema; `RADR_AGENT_OUTPUT=
+  claude-json` unwraps Claude Code's envelope (`structured_output`, else `result`).
+  `RADR_AGENT_ENV` names the extra variables the agent gets. The README's Claude Code argv was
+  checked against the installed CLI (v2.1.293): it has no `--max-turns`, and `--bare`
+  authenticates only with `ANTHROPIC_API_KEY`.
+- **The schema sent to the agent is minimal** (types, required fields, enums). Bounds, ID
+  membership and anchors are checked per item in radr, so one bad item is rejected and recorded
+  instead of failing the batch.
+- **`code-allowed` sends no code from a file the secrets lane flagged.** A neighbouring
+  finding's ±5 lines could include the secret, and history findings' line numbers come from
+  old commits, so line-level redaction can't be trusted.
+- **Annotations never reach the report.** Only confirmed judgment findings and drafts a person
+  has reviewed do.
+- **LLM metrics** (calls, schema-valid, fail-protocol, judgments proposed/kept/dismissed) are a
+  fold over the event log in `src/state/llm-metrics.ts`, shown by `radr status`. They live
+  outside `src/llm` because the boundary bans `src/llm` from importing the dispositions module.
+
+### Open items carried forward
+
+- Run the real-agent eval (`RADR_E2E_AGENT=1`, needs an API key) and record the schema-valid
+  and anchor-valid rates.
+- Judgment findings aren't in the remediation plan: plan acceptance criteria are lane re-runs,
+  which can't re-check a judgment. Decide how a confirmed judgment is tracked to closure (M6
+  `verify`).
+- Severity overrides for tool findings (PRD §10) are not built.
+- Clusters are only found within one prompt batch (200 KB); cross-batch clustering isn't done.
+- The `{schema}` keywords radr sends are deliberately minimal; whether an agent enforces more
+  (lengths, patterns) is untested.
+

@@ -20,7 +20,7 @@ import type { Rubric } from "../rubric/rubric.js";
 import type { EventLog } from "../state/events.js";
 import { invokeAgent, type AgentContext } from "./policy.js";
 import { batchPrompts } from "./prompt.js";
-import { promptFinding } from "./redact.js";
+import { promptFinding, secretFiles } from "./redact.js";
 
 export const PURPOSE = "triage";
 const MAX_TEXT = 2000;
@@ -111,7 +111,8 @@ export async function triage(inp: TriageInputs): Promise<TriageResult> {
   if (policy === "off") throw new RefusedError(`LLM policy is "off" for ${inp.layout.id}; set llm_policy in engagement.yml and re-approve the scope`);
   const ctx: AgentContext = { policy, env: inp.env, llmDir: inp.layout.llm, log: inp.log, actor: inp.actor, matrix: inp.matrix };
   const ordered = stableSort(inp.findings, (f) => [-SEVERITIES.indexOf(f.severity), f.id]);
-  const items = ordered.map((f) => promptFinding(f, policy, inp.layout.worktree));
+  const noCode = secretFiles(inp.findings);
+  const items = ordered.map((f) => promptFinding(f, policy, inp.layout.worktree, noCode));
   const context = { engagement_type: inp.doc.engagement_type, policy };
   const batches = items.length === 0 ? [] : batchPrompts(INSTRUCTIONS, PURPOSE, context, items, inp.maxPromptBytes);
 

@@ -5,7 +5,10 @@
 //                  quotes the code it matched (rule messages may interpolate metavariables) is
 //                  replaced by the rule ID.
 //   code-allowed   the same, plus the anchored lines ±CONTEXT_LINES, bounded per finding.
-//   secrets        whatever the policy, a secrets finding carries neither snippet nor message.
+//   secrets        whatever the policy, a secrets finding carries neither snippet nor message,
+//                  and no code is sent from a file where the secrets lane found anything (a
+//                  neighbouring finding's ±5 lines could include the secret; history findings'
+//                  line numbers are from old commits, so line-level redaction can't be trusted).
 //
 // "Quotes the code" means: the message, with whitespace removed, contains any QUOTE_RUN-character
 // run of the anchored source lines with whitespace removed (the whole file for line 0). The
@@ -71,7 +74,12 @@ function anchored(lines: readonly string[], f: Finding): string {
   return lines.slice(f.line - 1, Math.max(f.line, f.end_line)).join("\n");
 }
 
-export function promptFinding(f: Finding, policy: Exclude<LlmPolicy, "off">, worktree: string): PromptFinding {
+/** Files the secrets lane reported anything in: no code is ever sent from them. */
+export function secretFiles(findings: readonly Finding[]): Set<string> {
+  return new Set(findings.filter((f) => f.category === "secrets").map((f) => f.file));
+}
+
+export function promptFinding(f: Finding, policy: Exclude<LlmPolicy, "off">, worktree: string, noCode: ReadonlySet<string> = new Set()): PromptFinding {
   const base = {
     id: f.id, lane: f.lane, tool: f.tool, rule_id: f.rule_id, category: f.category, severity: f.severity,
     file: f.file, line: f.line, end_line: f.end_line, cve: f.cve, cvss: f.cvss,
@@ -80,7 +88,7 @@ export function promptFinding(f: Finding, policy: Exclude<LlmPolicy, "off">, wor
   const lines = fileLines(worktree, f.file);
   // A message about a file radr can't read can't be checked, so it isn't sent.
   const message = lines === null ? f.rule_id : quotes(f.message, anchored(lines, f)) ? f.rule_id : f.message;
-  if (policy === "metadata-only" || lines === null || f.line <= 0) return { ...base, message };
+  if (policy === "metadata-only" || lines === null || f.line <= 0 || noCode.has(f.file)) return { ...base, message };
 
   const start = Math.max(1, f.line - CONTEXT_LINES);
   const end = Math.min(lines.length, Math.max(f.line, f.end_line) + CONTEXT_LINES, start + MAX_SNIPPET_LINES - 1);

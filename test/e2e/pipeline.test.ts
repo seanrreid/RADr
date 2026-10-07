@@ -9,11 +9,13 @@
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
 import { FAKE_AWS_KEY_ID, POLYGLOT, makeFixtureRepo, makePolyglotFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { promptFreeText } from "../../src/llm/prompt.js";
+import { leakedRuns } from "../../src/llm/redact.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const TOOLS_HOME = process.env["RADR_E2E_TOOLS"];
@@ -26,14 +28,14 @@ const ADVISORIES = {
   Maven: ["GHSA-jfh8-c2jp-5v3q.json"], Packagist: ["GHSA-q7rv-6hp3-vh96.json"], RubyGems: ["GHSA-3h57-hmj3-gj3p.json"], NuGet: ["GHSA-5crp-9r3c-p9vr.json"],
 } as const;
 
-interface Env { readonly TZ: string; readonly LANG: string }
+interface Env { readonly TZ: string; readonly LANG: string; readonly extra?: Readonly<Record<string, string>> }
 
 async function radr(home: string, env: Env, ...args: string[]): Promise<{ code: number | null; out: string; err: string }> {
   const r = await run({
     command: process.execPath,
     args: [bin, ...args],
     cwd: home,
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, RADR_HOME: home, RADR_ACTOR: "e2e@example.com", RADR_CONTAINER_RUNTIME: "none", TZ: env.TZ, LANG: env.LANG, LC_ALL: env.LANG },
+    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, RADR_HOME: home, RADR_ACTOR: "e2e@example.com", RADR_CONTAINER_RUNTIME: "none", TZ: env.TZ, LANG: env.LANG, LC_ALL: env.LANG, ...env.extra },
     timeoutMs: 10 * 60 * 1000,
     okExitCodes: [0, 1, 2, 3],
   });
@@ -156,6 +158,33 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     assert.match(a.hash, /^sha256:[0-9a-f]{64}$/);
     assert.equal(a.hash, b.hash);
     assert.deepEqual(a.findings.map((f) => f["id"]), b.findings.map((f) => f["id"]));
+  });
+
+  it("M4: prompts over real tool output quote no repo code (metadata-only) and never carry a secret (AC3)", async () => {
+    const script = tmpDir("radr-e2e-agent-");
+    const empty = JSON.stringify({ explanations: [], clusters: [], dispositions: [], judgments: [] });
+    for (let i = 1; i <= 50; i++) writeFileSync(path.join(script, `response-${String(i)}`), empty);
+    const agent = path.join(repoRoot, "dist", "test", "helpers", "fake-agent.js");
+    const env: Env = { TZ: "UTC", LANG: "C", extra: { RADR_AGENT_CMD: JSON.stringify([process.execPath, agent, script]) } };
+    const poly = await makePolyglotFixtureRepo(path.join(fixtureRoot, "polyglot-llm"));
+    for (const [repo, policy] of [[poly, "metadata-only"], [fixture, "code-allowed"]] as const) {
+      const home = await freshHome(env);
+      const yml = path.join(home, "engagements", "acme-e2e", "engagement.yml");
+      for (const s of [["init", "acme", "e2e"], ["scope", "-e", "acme-e2e", "--source", repo.dir]]) assert.equal((await radr(home, env, ...s)).code, 0);
+      writeFileSync(yml, readFileSync(yml, "utf8").replace("llm_policy: off", `llm_policy: ${policy}`));
+      for (const s of [["approve", "scope", "-e", "acme-e2e"], ["review", "-e", "acme-e2e"], ["triage", "-e", "acme-e2e"]]) {
+        const r = await radr(home, env, ...s);
+        assert.equal(r.code, 0, `radr ${s.join(" ")} (${policy}):\n${r.out}\n${r.err}`);
+      }
+      const llm = path.join(home, "engagements", "acme-e2e", "llm");
+      const worktree = path.join(home, "engagements", "acme-e2e", "source", "worktree");
+      const prompts = readdirSync(llm).filter((f) => f.endsWith(".prompt.txt")).map((f) => readFileSync(path.join(llm, f), "utf8"));
+      assert.ok(prompts.length > 0, `${policy}: no prompt was sent`);
+      for (const p of prompts) {
+        assert.ok(!p.includes(FAKE_AWS_KEY_ID), `${policy}: a prompt carries the planted secret`);
+        if (policy === "metadata-only") assert.deepEqual(leakedRuns(promptFreeText(p), worktree), [], "metadata-only prompt quotes the repository");
+      }
+    }
   });
 
   it("M3: every new stack is detected, and sca and sast find its planted signals (AC11)", async () => {

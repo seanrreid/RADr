@@ -15,9 +15,9 @@ what needs hands-on work.
   timezone, or locale.
 
 See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
-[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md).
+[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md).
 
-**Status: M3 (M4 in progress).** Read and Address work for **TS/JS, Python, Go, Rust,
+**Status: M4.** Read and Address work for **TS/JS, Python, Go, Rust,
 JVM (Java/Kotlin), PHP, Ruby, and .NET**:
 
 - the deterministic core
@@ -32,6 +32,9 @@ JVM (Java/Kotlin), PHP, Ruby, and .NET**:
   toolchain image with the network denied
 - rubric v1 with EPSS/KEV promotion, the triage scorecard, and the client report with its
   remediation plan, Gate 2 sign-off, and a branded PDF
+- **an optional LLM lane** (per engagement): explanations, clusters and proposed
+  dispositions; judgment findings a person must confirm; drafts of the report's prose
+  blocks. The model never sets severity or makes a decision.
 
 Still to come: the LLM lane (M4, in progress), Debug (M5), and PR review and verify (M6).
 
@@ -70,14 +73,19 @@ radr scope                                  # pin the warmed cache
 radr approve scope                          # Gate 1: freezes the fingerprint
 
 # Read
-radr review                                 # all lanes; routine findings auto-confirm (rubric v1)
+radr review                                 # all lanes; routine findings auto-confirm (rubric v2 for new scopes)
 radr scorecard                              # triage verdict
 radr findings --state pending               # the review set: decisions only you can make
 radr disposition F-0003 confirmed
 radr disposition --lane lint dismissed --reason "generated code"   # bulk, shared reason
 
+# Optional, with llm_policy metadata-only or code-allowed (see "The LLM lane"):
+radr triage                                 # explanations, clusters, proposals, judgment findings (J-…)
+radr disposition J-0001 pending             # accept a proposed judgment for review (or dismiss it)
+
 # Address
 radr address                                # report.md + remediation.md (edit the keep-blocks)
+radr address --draft                        # optional: LLM drafts of untouched prose blocks
 radr approve report                         # Gate 2 (or --accept-partial "<reason>")
 radr render                                 # report.pdf + remediation.pdf
 ```
@@ -103,12 +111,24 @@ These lanes are opt-in:
 `radr rules coverage` shows the SAST support bar per stack: every top-10 weakness target
 has a fixture-tested rule. The report's methodology section states the same.
 
-## The LLM lane (optional; M4, in progress)
+## The LLM lane (optional)
 
 An engagement's `llm_policy` is `off` (the default), `metadata-only` (rule IDs, paths,
-lines and metrics; no source), or `code-allowed` (the anchored lines ±5). The policy is
-part of the scope fingerprint. The LLM explains and proposes; it never sets severity,
-changes a disposition, or approves a gate.
+lines and metrics; no source), or `code-allowed` (the anchored lines ±5, never from a file
+the secrets lane flagged). The policy is part of the scope fingerprint. Under
+`metadata-only`, a tool message that quotes the matched code is replaced by its rule ID.
+
+- **`radr triage`** sends the run's findings in batches. The model's explanations, clusters
+  and proposed dispositions are shown by `radr findings`, labelled `[LLM]`, and never change
+  a finding. **Judgment findings** it proposes (`J-0001`, …) must point at a real line range
+  in scope; they start `proposed`, and you accept (`pending`) or dismiss each one. Their
+  severity comes from the rubric (`medium`, rubric v2); change it with
+  `radr severity J-0001 high --reason "…"`. Gate 2 refuses while any is undecided.
+- **`radr address --draft`** drafts the executive summary, recommendations and plan notes,
+  only where you haven't written anything. Each draft carries a `<!-- radr:llm-draft -->`
+  marker; Gate 2 refuses until you've read it and deleted the marker.
+- **`radr status`** shows how many agent calls returned valid output and how many proposed
+  judgment findings you kept.
 
 radr runs one agent command, never through a shell, from an empty temp directory, with
 only `PATH`, `HOME` and the variables you name in `RADR_AGENT_ENV`. Every prompt and
@@ -124,7 +144,8 @@ export RADR_AGENT_ENV=ANTHROPIC_API_KEY    # --bare authenticates only with an A
 ```
 
 `{schema}` is replaced by each call's response schema; radr validates the response
-against it as well.
+against it as well. A response that doesn't validate is retried once, then that batch is
+marked partial (`policy/matrix.yml`, row `llm`).
 
 ## What radr guarantees
 
@@ -143,6 +164,8 @@ against it as well.
 | Secrets are never written in clear | gitleaks runs with `--redact`, and the adapter refuses unredacted output. |
 | Severity is never guessed | The rubric maps every (tool, severity) pair explicitly. Unmapped pairs refuse. |
 | Same scope, same findings | The findings-set hash is identical across homes, `TZ`, and `LANG` (tested end to end). |
+| The LLM proposes, people decide | Under policy `off` the agent is never spawned. Agent output can't set a severity, a disposition, or a gate (ESLint boundary + an adversarial eval). Judgment findings are kept apart from tool findings, so they never change the findings-set hash. |
+| You can audit what left the machine | Every prompt and response is stored in `llm/`, hash-linked from an `llm-call` event. A `metadata-only` prompt quotes no client code (checked against the whole repo in tests). |
 
 In host mode, static lanes' network isolation is **declared**, not enforced. Container mode
 enforces it (`--network=none`), and an end-to-end test proves a lane cannot reach the

@@ -726,7 +726,7 @@ debug hypothesis proposal — each of which only runs through `RADR_AGENT_CMD`.
 | **M1** ✅ ([as built](docs/m1-plan.md#as-built-2026-10-07)) | TypeScript project skeleton, determinism utilities + property tests (§15), dependency budget + `--ignore-scripts` CI check, engagement folder, hash-chained event log, source snapshot (mirror + read-only worktree), Gate 1, fingerprint, host-mode toolchain (`tools install`, `doctor`, `db sync`), `census` / `lint` (baseline mode) / `secrets` / `sca` lanes for TS/JS + Python, SARIF normalization, findings + dispositions, no-LLM mode |
 | **M2** ✅ ([as built](docs/m2-plan.md#as-built-2026-10-07)) | `triage` tier + scorecard, rubric v1, Address report.md + PDF render, Gate 2, **build sandbox, then on top of it the `types` lane, `lint` project mode, and the `coverage` lane for TS/JS + Python** (recipe detection, `radr deps warm`, N-run stability), rubric auto-confirm + bulk disposition |
 | **M3** ✅ ([as built](docs/m3-plan.md#as-built-2026-10-07)) | Container image, remaining lanes (`sast`, `maint`, `history`, `license`, `iac`, `hygiene`), Go/Rust/JVM/PHP/Ruby/.NET packs **including their build recipes**; coverage % for Go (Rust/JVM/PHP/Ruby/.NET run tests for pass/fail + stability; their coverage tools need per-project build config, deferred) |
-| **M4** | LLM lane (`triage`, drafting, judgment findings) with policy enforcement + evals |
+| **M4** ✅ ([as built](docs/m4-plan.md#as-built-2026-10-07)) | LLM lane (`triage`, drafting, judgment findings) with policy enforcement + evals; rubric v2 (judgment entry) |
 | **M5** | Debug workflow (reuses the M2 sandbox for repro and `git bisect run`) |
 | **M6** | `diff` tier (consultant-side, against a fork; §13), `verify` |
 
