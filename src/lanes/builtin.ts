@@ -9,6 +9,7 @@ import { ParseError, eslintAdapter, gitleaksAdapter, osvAdapter, ruffAdapter, sc
 import { ESLINT_BASELINE } from "../toolchain/install.js";
 import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type LaneContext, type LaneOutcome, type LaneResult, type ToolRun } from "./lane.js";
 import { history, tests } from "./metrics.js";
+import { coverage, eslintProject, types } from "./sandboxed.js";
 
 /** Most severe first: a lane with several tools reports the worst of their outcomes. */
 const OUTCOME_RANK: readonly LaneOutcome[] = ["tool-missing", "version-drift", "tool-error", "timeout", "output-cap", "parse-error", "success"];
@@ -59,11 +60,18 @@ async function step(
   }
 }
 
-function combine(steps: readonly Awaited<ReturnType<typeof step>>[], metrics?: Record<string, unknown>): LaneResult {
+interface StepOutcome {
+  readonly outcome: LaneOutcome;
+  readonly run?: ToolRun;
+  readonly findings: readonly FindingDraft[];
+  readonly detail?: string;
+}
+
+function combine(steps: readonly StepOutcome[], metrics?: Record<string, unknown>): LaneResult {
   const detail = steps.map((s) => s.detail).filter((d) => d !== undefined).join("; ");
   return {
     outcome: worstOutcome(steps.map((s) => s.outcome)),
-    tools: steps.map((s) => s.run),
+    tools: steps.flatMap((s) => (s.run === undefined ? [] : [s.run])),
     findings: steps.flatMap((s) => s.findings),
     ...(metrics !== undefined ? { metrics } : {}),
     ...(detail !== "" ? { detail } : {}),
@@ -86,9 +94,22 @@ export const lint: Lane = {
   id: "lint",
   tools: ["ruff", "node-tools"],
   async run(ctx) {
-    const steps = [];
+    const steps: StepOutcome[] = [];
     const wt = realWorktree(ctx);
     const read = snippetReader(wt);
+    const modes = ctx.doc.lint_modes ?? ["baseline"];
+    if (modes.includes("project")) {
+      // Project mode: the CLIENT's own config. ruff needs no deps, so it runs on the host
+      // (no --config, so ruff discovers the client's pyproject/ruff.toml); eslint needs the
+      // client's installed plugins, so it runs in the sandbox.
+      if (ctx.doc.stacks.includes("python")) {
+        steps.push(await step(ctx, "lint", "ruff-project", "ruff-project.json",
+          () => run({ command: bin(ctx, "ruff"), args: ["check", "--output-format", "json", "--no-cache", "--exit-zero", "."], cwd: wt, env: toolEnv(ctx) }),
+          (raw, ref) => ruffAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["ruff"] ?? "", snippet: read }, "project")));
+      }
+      if (ctx.doc.stacks.includes("typescript-javascript")) steps.push(await eslintProject(ctx));
+    }
+    if (!modes.includes("baseline")) return combine(steps);
     if (ctx.doc.stacks.includes("typescript-javascript")) {
       const nt = ctx.tools.nodeTools;
       steps.push(await step(ctx, "lint", "eslint", "eslint.json",
@@ -172,4 +193,4 @@ export const sca: Lane = {
   },
 };
 
-export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca, history, tests };
+export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca, history, tests, types, coverage };

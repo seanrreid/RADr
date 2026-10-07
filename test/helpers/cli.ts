@@ -15,7 +15,7 @@ export function cliRunner(home: string, extraEnv: Record<string, string> = {}, c
     const out: string[] = [];
     const err: string[] = [];
     const code = await runCli(argv, {
-      env: { PATH: process.env["PATH"] ?? "", RADR_HOME: home, RADR_ACTOR: "consultant@example.com", ...extraEnv },
+      env: { PATH: process.env["PATH"] ?? "", RADR_HOME: home, RADR_ACTOR: "consultant@example.com", RADR_CONTAINER_RUNTIME: "none", ...extraEnv },
       cwd,
       clock,
       out: (l) => out.push(l),

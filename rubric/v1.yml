@@ -30,8 +30,11 @@ base:
   gitleaks: { secret: high }                            # every secret starts high; see overrides
   osv-scanner: { cvss: from-cvss, unscored: medium }
   tsc: { error: low }
-  pyright: { error: low, warning: info, information: info }
-  radr-coverage: { build-failed: high, tests-failed: medium, flaky-test: medium }
+  mypy: { error: low, note: info }
+  eslint-project: { "2": low, "1": info, fatal: low }  # client config (lint project mode)
+  ruff-project: { error: low }
+  radr-build: { build-failed: high }                  # does not build from a clean checkout
+  radr-coverage: { tests-failed: medium, flaky-test: medium }
   # M3 tools (opengrep, bandit, gosec, checkov, …) are added here as their adapters land.
 
 # --- 2. Rule overrides: exact (tool, rule_id) → severity, applied after base ---------------------
@@ -70,7 +73,7 @@ path_modifiers:
 # --- 5. Disposition routing (PRD §8) -------------------------------------------------------------
 disposition:
   auto_confirm:
-    lanes: [lint, types, coverage, sca]
+    lanes: [lint, types, sca]
     max_severity: medium             # auto-confirm only findings at medium or below
     sca_requires_cve: true           # an SCA finding auto-confirms only with a CVE
   review_set:                        # always human-dispositioned, whatever the lane rules say

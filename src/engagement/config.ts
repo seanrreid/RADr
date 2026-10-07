@@ -6,11 +6,14 @@ import { stringify } from "yaml";
 import { UsageError } from "../core/errors.js";
 import { parseYaml } from "../core/yaml.js";
 import { GIT_SHA, SLUG, makeValidator } from "../schemas/validate.js";
+import { RECIPE_SCHEMA, type BuildRecipe } from "../sandbox/recipe.js";
 
 export const ENGAGEMENT_TYPES = ["triage", "quality", "health-audit", "security", "due-diligence", "pr-review", "debug"] as const;
 export const TIERS = ["triage", "standard", "deep", "diff"] as const;
 /** Lanes implemented in M1. Later milestones extend this list (and policy/matrix.yml). */
-export const LANES = ["census", "lint", "secrets", "sca", "history", "tests"] as const;
+export const LANES = ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage"] as const;
+/** Lanes that run client code in the build sandbox. */
+export const SANDBOX_LANES: readonly string[] = ["types", "coverage"];
 /** The triage tier runs this fixed set (PRD §5): fast, static, no sandbox. */
 export const TRIAGE_LANES: readonly (typeof LANES)[number][] = ["census", "lint", "secrets", "sca", "history", "tests"];
 export const STACKS = ["typescript-javascript", "python"] as const;
@@ -29,6 +32,10 @@ export interface EngagementDoc {
   readonly network: { readonly mode: "offline" | "network"; readonly enforcement: "declared" | "container" };
   readonly llm_policy: "off" | "metadata-only" | "code-allowed";
   readonly client_licenses: readonly string[];
+  /** Sandbox build recipe (M2); required by the types and coverage lanes and lint project mode. */
+  readonly build?: BuildRecipe;
+  /** Lint modes: baseline (radr configs, no deps) and/or project (client configs; eslint needs the sandbox). */
+  readonly lint_modes?: readonly ("baseline" | "project")[];
 }
 
 const strArray = { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } as const;
@@ -67,6 +74,8 @@ const validate = makeValidator<EngagementDoc>(
       },
       llm_policy: { enum: ["off", "metadata-only", "code-allowed"] },
       client_licenses: strArray,
+      build: RECIPE_SCHEMA,
+      lint_modes: { type: "array", items: { enum: ["baseline", "project"] }, uniqueItems: true, minItems: 1 },
     },
   },
   UsageError,
@@ -97,5 +106,5 @@ const HEADER = `# engagement.yml: the scope for this engagement (PRD §7, Gate 1
 `;
 
 export function writeEngagement(file: string, doc: EngagementDoc): void {
-  writeFileSync(file, HEADER + stringify(doc, { lineWidth: 0 }));
+  writeFileSync(file, HEADER + stringify(doc, { lineWidth: 0, aliasDuplicateObjects: false }));
 }

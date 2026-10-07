@@ -30,7 +30,7 @@ async function radr(home: string, env: Env, ...args: string[]): Promise<{ code: 
     command: process.execPath,
     args: [bin, ...args],
     cwd: home,
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, RADR_HOME: home, RADR_ACTOR: "e2e@example.com", TZ: env.TZ, LANG: env.LANG, LC_ALL: env.LANG },
+    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, RADR_HOME: home, RADR_ACTOR: "e2e@example.com", RADR_CONTAINER_RUNTIME: "none", TZ: env.TZ, LANG: env.LANG, LC_ALL: env.LANG },
     timeoutMs: 10 * 60 * 1000,
     okExitCodes: [0, 1, 2, 3],
   });

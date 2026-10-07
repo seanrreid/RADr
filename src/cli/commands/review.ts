@@ -28,7 +28,7 @@ export const review: CommandSpec = {
     const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
     const home = radrHome(ctx.env);
     const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
-    const r = await runReview(home, l, await resolveActor(ctx.env), ctx.clock);
+    const r = await runReview(home, l, await resolveActor(ctx.env), ctx.clock, ctx.env);
     ctx.out(`run ${r.runId}: ${r.status}`);
     for (const s of r.lanes) {
       ctx.out(`  ${s.lane.padEnd(8)} ${s.outcome.padEnd(14)} ${s.action.padEnd(9)} findings=${s.findings}${s.attempts > 1 ? ` attempts=${s.attempts}` : ""}`);

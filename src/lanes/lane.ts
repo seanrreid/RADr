@@ -9,6 +9,7 @@ import type { ExecOutcome, ExecResult } from "../core/exec.js";
 import type { EngagementDoc } from "../engagement/config.js";
 import type { Layout } from "../engagement/home.js";
 import type { FindingDraft } from "../findings/types.js";
+import type { Runtime } from "../sandbox/runtime.js";
 
 export type LaneOutcome = "success" | "tool-missing" | "version-drift" | "tool-error" | "timeout" | "output-cap" | "parse-error";
 
@@ -32,6 +33,8 @@ export interface Toolbox {
   readonly osvDb: string | null;
   /** Absolute path of radr's ruff baseline config. */
   readonly ruffConfig: string;
+  /** Build sandbox (M2): runtime + offline dependency cache. null = no runtime detected. */
+  readonly sandbox: { readonly runtime: Runtime; readonly depsCache: string | null } | null;
 }
 
 export interface LaneContext {

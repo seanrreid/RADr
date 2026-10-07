@@ -10,7 +10,10 @@ import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
 import { EventLog } from "../state/events.js";
 import { engagementHash, readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
-import { LANES, loadEngagement, writeEngagement, type EngagementDoc } from "./config.js";
+import { LANES, SANDBOX_LANES, loadEngagement, writeEngagement, type EngagementDoc } from "./config.js";
+import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
+import { proposeRecipe } from "../sandbox/recipe.js";
+import { listDeps, verifyDeps } from "../sandbox/deps.js";
 import { detectStacks, type Detection } from "./detect.js";
 import type { Layout } from "./home.js";
 import { checkoutWorktree, mirrorSource, refsHash, resolveSha, verifyWorktree } from "./source.js";
@@ -25,6 +28,8 @@ export interface ScopeRequest {
   readonly rev?: string;
   /** RADR_HOME, for the toolchain and vulnerability-DB snapshots. */
   readonly home: string;
+  /** Host env, for reaching a container runtime (Podman/Docker). */
+  readonly env?: NodeJS.ProcessEnv;
   /** OSV snapshot id to pin; defaults to the newest. */
   readonly snapshot?: string;
 }
@@ -55,11 +60,14 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
   const sha = await resolveSha(l.mirror, req.rev ?? existing?.source.sha);
   await checkoutWorktree(l.mirror, l.worktree, sha);
   const detection = detectStacks(l.worktree);
+  const runtime = await detectRuntime(req.env ?? {});
+  const recipe = proposeRecipe(l.worktree, detection.stacks);
+  const canSandbox = runtime !== undefined && Object.keys(recipe).length > 0;
   const created = log.read().find((e) => e.type === "engagement-created");
   if (created === undefined) throw new RefusedError(`${l.events}: missing engagement-created event`);
 
   const doc: EngagementDoc = existing
-    ? { ...existing, source: { ...existing.source, sha }, stacks: detection.stacks }
+    ? { ...existing, source: { ...existing.source, sha }, stacks: detection.stacks, ...(existing.build === undefined && canSandbox ? { build: recipe } : {}) }
     : {
         version: 1,
         client: String(created.data["client"]),
@@ -69,14 +77,16 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
         source: { origin: normalizeOrigin(req.source ?? ""), sha },
         paths: { include: ["**"], exclude: [] },
         stacks: detection.stacks,
-        lanes: [...LANES],
+        lanes: LANES.filter((x) => canSandbox || !SANDBOX_LANES.includes(x)),
         rubric: "v1",
         network: { mode: "offline", enforcement: "declared" },
         llm_policy: "off",
         client_licenses: [],
+        ...(canSandbox ? { build: recipe } : {}),
+        lint_modes: ["baseline"],
       };
   writeEngagement(l.engagementYml, doc);
-  const warnings = await writeLocks(req, doc, log);
+  const warnings = await writeLocks(req, doc, log, runtime);
 
   const fingerprint = scopeFingerprint(readScopeInputs(l));
   log.append("scope-proposed", req.actor, { fingerprint, engagement_hash: engagementHash(doc) });
@@ -88,11 +98,13 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
  * not installed, no DB snapshot) is removed, not left stale, and reported as a warning;
  * approveScope refuses until it exists.
  */
-async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog): Promise<string[]> {
+async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog, runtime: Runtime | undefined): Promise<string[]> {
   const l = req.layout;
   const warnings: string[] = [];
+  const usesSandbox = doc.lanes.some((x) => SANDBOX_LANES.includes(x)) || (doc.lint_modes ?? []).includes("project");
+  if (usesSandbox && runtime === undefined) warnings.push("sandboxed lanes are enabled but no container runtime is reachable (start Podman/Docker, then `radr scope` again)");
   try {
-    const lock = buildLock(await doctor(req.home));
+    const lock = buildLock(await doctor(req.home), usesSandbox ? sandboxLockEntry(runtime) : null);
     writeLock(l.toolchainLock, lock);
     log.append("toolchain-locked", req.actor, { lock_hash: hashBytes(readFileSync(l.toolchainLock)), mode: lock.mode });
   } catch (e) {
@@ -105,20 +117,27 @@ async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog):
   const snapshots = listSnapshots(req.home);
   const chosen = req.snapshot !== undefined ? verifySnapshot(req.home, req.snapshot) : snapshots.at(-1);
   if (chosen !== undefined) verifySnapshot(req.home, chosen.id);
-  if (needsOsv && chosen === undefined) {
-    rmSync(l.snapshotsLock, { force: true });
-    warnings.push("no OSV vulnerability DB snapshot (needed by the sca lane); run `radr db sync`, then `radr scope` again");
-  } else {
-    // EPSS/KEV are fail-open (P7): pin the newest if present, otherwise warn and pin null.
-    const epss = needsOsv ? listContext(req.home, "epss").at(-1) : undefined;
-    const kev = needsOsv ? listContext(req.home, "kev").at(-1) : undefined;
-    if (epss !== undefined) verifyContext(req.home, "epss", epss.id);
-    if (kev !== undefined) verifyContext(req.home, "kev", kev.id);
-    if (needsOsv && (epss === undefined || kev === undefined)) {
-      warnings.push(`no ${[epss === undefined ? "EPSS" : "", kev === undefined ? "KEV" : ""].filter(Boolean).join("/")} snapshot: severity promotion for exploitability will be skipped (run \`radr db sync\`)`);
-    }
-    writeSnapshotsLock(l.snapshotsLock, buildSnapshotsLock(needsOsv ? chosen : undefined, epss, kev));
+  // Each snapshot is judged independently, so every gap is reported in one scope pass.
+  const missingOsv = needsOsv && chosen === undefined;
+  if (missingOsv) warnings.push("no OSV vulnerability DB snapshot (needed by the sca lane); run `radr db sync`, then `radr scope` again");
+
+  // EPSS/KEV are fail-open (P7): pin the newest if present, otherwise warn and pin null.
+  const epss = needsOsv ? listContext(req.home, "epss").at(-1) : undefined;
+  const kev = needsOsv ? listContext(req.home, "kev").at(-1) : undefined;
+  if (epss !== undefined) verifyContext(req.home, "epss", epss.id);
+  if (kev !== undefined) verifyContext(req.home, "kev", kev.id);
+  if (needsOsv && (epss === undefined || kev === undefined)) {
+    warnings.push(`no ${[epss === undefined ? "EPSS" : "", kev === undefined ? "KEV" : ""].filter(Boolean).join("/")} snapshot: severity promotion for exploitability will be skipped (run \`radr db sync\`)`);
   }
+
+  const offlineSandbox = usesSandbox && doc.network.mode === "offline";
+  const deps = offlineSandbox ? listDeps(req.home, l.id).at(-1) : undefined;
+  if (deps !== undefined) verifyDeps(req.home, l.id, deps.id);
+  if (offlineSandbox && deps === undefined) warnings.push("no dependency snapshot for offline sandbox installs (run `radr deps warm`, then `radr scope` again)");
+
+  // Without OSV the sca lane can't run, so there is no lock to approve against (approve refuses).
+  if (missingOsv) rmSync(l.snapshotsLock, { force: true });
+  else writeSnapshotsLock(l.snapshotsLock, buildSnapshotsLock(needsOsv ? chosen : undefined, epss, kev, deps));
   return warnings;
 }
 

@@ -31,6 +31,8 @@ export interface ToolchainLock {
   readonly tools: Readonly<Record<string, { readonly version: string; readonly bin_sha256: string }>>;
   readonly node_tools: { readonly lock_sha256: string; readonly eslint_version: string };
   readonly configs: Readonly<Record<string, string>>;
+  /** Container runtime + pinned image refs (M2). null = no runtime: sandboxed lanes unavailable. */
+  readonly sandbox?: { readonly runtime: string; readonly version: string; readonly images: Readonly<Record<string, string>> } | null;
 }
 
 /** Verify one manifest tool: receipt present, binary hash matches receipt, binary reports the pinned version. */
@@ -76,7 +78,7 @@ export async function doctor(home: string): Promise<ToolCheck[]> {
 }
 
 /** Build the lock from a fully healthy toolchain; refuses if anything is missing or drifted. */
-export function buildLock(checks: readonly ToolCheck[]): ToolchainLock {
+export function buildLock(checks: readonly ToolCheck[], sandbox: ToolchainLock["sandbox"] = null): ToolchainLock {
   const bad = checks.filter((c) => c.state !== "ok");
   if (bad.length > 0) throw new RefusedError(`toolchain not ready: ${bad.map((c) => `${c.tool} ${c.state} (${c.detail})`).join("; ")}`);
   const tools: Record<string, { version: string; bin_sha256: string }> = {};
@@ -92,11 +94,12 @@ export function buildLock(checks: readonly ToolCheck[]): ToolchainLock {
       eslint_baseline: hashBytes(readAsset(`toolchain/configs/eslint/${ESLINT_BASELINE}`)),
       ruff_baseline: hashBytes(readAsset("toolchain/configs/ruff/ruff.toml")),
     },
+    sandbox,
   };
 }
 
 export function writeLock(file: string, lock: ToolchainLock): void {
-  writeFileSync(file, `# toolchain.lock: written by radr; part of the scope fingerprint. Do not edit.\n${stringify(lock, { lineWidth: 0 })}`);
+  writeFileSync(file, `# toolchain.lock: written by radr; part of the scope fingerprint. Do not edit.\n${stringify(lock, { lineWidth: 0, aliasDuplicateObjects: false })}`);
 }
 
 export function readLock(file: string): ToolchainLock {
@@ -115,6 +118,8 @@ export function diffLocks(locked: ToolchainLock, live: ToolchainLock): string[] 
   }
   if (locked.platform !== live.platform) out.push(`platform: locked ${locked.platform} ≠ live ${live.platform}`);
   if (locked.node_tools.lock_sha256 !== live.node_tools.lock_sha256) out.push("node-tools: lockfile changed");
+  const sb = (x: ToolchainLock["sandbox"]) => (x === undefined || x === null ? "none" : `${x.runtime} ${Object.values(x.images).join(",")}`);
+  if (sb(locked.sandbox) !== sb(live.sandbox)) out.push(`sandbox: locked ${sb(locked.sandbox)} ≠ live ${sb(live.sandbox)}`);
   for (const k of stableSort([...new Set([...Object.keys(locked.configs), ...Object.keys(live.configs)])], (x) => x)) {
     if (locked.configs[k] !== live.configs[k]) out.push(`config ${k}: changed`);
   }

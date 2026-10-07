@@ -8,6 +8,9 @@ import { buildLock, diffLocks, doctor as runDoctor, readLock } from "../../toolc
 import { httpFetcher, installNodeTools, installTool } from "../../toolchain/install.js";
 import { loadManifest } from "../../toolchain/manifest.js";
 import { listContext, syncContext } from "../../toolchain/vulnctx.js";
+import { detectRuntime, pullImages } from "../../sandbox/runtime.js";
+import { warmDeps } from "../../sandbox/deps.js";
+import { loadEngagement } from "../../engagement/config.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CommandSpec } from "../context.js";
 
@@ -27,6 +30,30 @@ export const tools: CommandSpec = {
       const status = name === "node-tools" ? await installNodeTools(home) : await installTool(home, name, manifest, httpFetcher);
       ctx.out(`${name.padEnd(12)} ${status}`);
     }
+    if (values.tool !== undefined) return;
+    // Sandbox images are pulled here (network), never during a run (--pull=never).
+    const rt = await detectRuntime(ctx.env);
+    if (rt === undefined) {
+      ctx.out("sandbox      skipped (no Podman/Docker reachable; sandboxed lanes will be unavailable)");
+      return;
+    }
+    for (const [image, s] of Object.entries(await pullImages(rt))) ctx.out(`${`image:${image}`.padEnd(12)} ${s} (${rt.name})`);
+  },
+};
+
+export const deps: CommandSpec = {
+  name: "deps",
+  usage: "radr deps warm [-e <id>]",
+  summary: "populate the offline dependency cache in the sandbox (network)",
+  async run(args, ctx) {
+    const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION }, 1);
+    if (positionals[0] !== "warm") throw new UsageError(`unknown deps action "${positionals[0] ?? ""}" (expected: warm)`);
+    const home = radrHome(ctx.env);
+    const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+    const rt = await detectRuntime(ctx.env);
+    if (rt === undefined) throw new RefusedError("no container runtime reachable (start Podman or Docker)");
+    const snap = await warmDeps(home, l, loadEngagement(l.engagementYml), rt, ctx.clock);
+    ctx.out(`deps snapshot ${snap.id} (${snap.stacks.join(", ")}; ${snap.files} files); pinned by the next \`radr scope\``);
   },
 };
 

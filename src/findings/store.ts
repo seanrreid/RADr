@@ -68,7 +68,16 @@ export function fingerprintDrafts(drafts: readonly FindingDraft[]): Fingerprinte
   });
   const ordered = stableSort(withKeys, (x) => [x.key, x.draft.line, x.draft.end_line, x.draft.message, x.draft.raw_ref]);
   const seen = new Map<string, number>();
-  return ordered.map((x) => {
+  // An engine fingerprint names ONE fact (a commit's secret, a package's advisory, a stack's
+  // failed build). If several lanes report it, it is one finding, not several.
+  const engineSeen = new Set<string>();
+  const unique = ordered.filter((x) => {
+    if (x.draft.engine_fingerprint === null) return true;
+    if (engineSeen.has(x.key)) return false;
+    engineSeen.add(x.key);
+    return true;
+  });
+  return unique.map((x) => {
     const n = seen.get(x.key) ?? 0;
     seen.set(x.key, n + 1);
     return { draft: x.draft, snippetHash: x.snippetHash, fingerprint: hash({ key: x.key, occurrence: n }) };

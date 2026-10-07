@@ -35,6 +35,7 @@ export const scope: CommandSpec = {
     const r = await proposeScope({
       layout: l,
       home,
+      env: ctx.env,
       actor: await resolveActor(ctx.env),
       clock: ctx.clock,
       ...(values.source !== undefined ? { source: values.source } : {}),

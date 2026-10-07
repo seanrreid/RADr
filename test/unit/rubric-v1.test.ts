@@ -35,7 +35,7 @@ describe("rubric v1 severity pipeline (AC1)", () => {
     assert.equal(r.assess(draft(), NO_VULN_CONTEXT).severity, "low");
     assert.equal(r.assess(draft({ tool: "gitleaks", tool_severity: "secret", category: "secrets", rule_id: "aws-access-token", lane: "secrets" }), NO_VULN_CONTEXT).severity, "critical");
     assert.equal(r.assess(draft({ tool: "gitleaks", tool_severity: "secret", category: "secrets", rule_id: "generic-api-key", lane: "secrets" }), NO_VULN_CONTEXT).severity, "medium");
-    assert.equal(r.assess(draft({ tool: "pyright", tool_severity: "information" }), NO_VULN_CONTEXT).severity, "info");
+    assert.equal(r.assess(draft({ tool: "mypy", tool_severity: "note" }), NO_VULN_CONTEXT).severity, "info");
   });
 
   it("promotes on KEV (to critical) and EPSS at the 1000 bp boundary (+1)", () => {
@@ -52,7 +52,7 @@ describe("rubric v1 severity pipeline (AC1)", () => {
 
   it("demotes non-production paths one step (never secrets or dependencies) and promotes sensitive SAST paths", () => {
     assert.equal(r.assess(draft({ file: "tests/test_app.py" }), NO_VULN_CONTEXT).severity, "info");
-    assert.equal(r.assess(draft({ file: "tests/test_app.py", tool_severity: "error", tool: "pyright" }), NO_VULN_CONTEXT).severity, "info");
+    assert.equal(r.assess(draft({ file: "tests/test_app.py", tool_severity: "error", tool: "mypy" }), NO_VULN_CONTEXT).severity, "info");
     assert.equal(r.assess(draft({ file: "info.py", tool: "eslint", tool_severity: "1" }), NO_VULN_CONTEXT).severity, "info", "already the floor");
     assert.equal(r.assess(vuln({ file: "tests/package-lock.json" }), NO_VULN_CONTEXT).severity, "high", "dependencies are not demoted");
     assert.equal(r.assess(draft({ tool: "gitleaks", tool_severity: "secret", category: "secrets", rule_id: "x", file: "tests/.env", lane: "secrets" }), NO_VULN_CONTEXT).severity, "high");

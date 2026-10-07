@@ -81,7 +81,11 @@ const base = (lane: string, tool: string, version: string) => ({
 });
 
 /** ESLint `--format json` (array of {filePath, messages[]}). */
-export function eslintAdapter(input: AdapterInput): FindingDraft[] {
+/** Lint mode: baseline = radr configs (tool "eslint"/"ruff"); project = client configs ("…-project"). */
+export type LintMode = "baseline" | "project";
+const lintTool = (tool: "eslint" | "ruff", mode: LintMode): string => (mode === "baseline" ? tool : `${tool}-project`);
+
+export function eslintAdapter(input: AdapterInput, mode: LintMode = "baseline"): FindingDraft[] {
   const out: FindingDraft[] = [];
   arr(parseJson(input.raw, "eslint"), "eslint").forEach((fileEntry, fi) => {
     const f = obj(fileEntry, `eslint[${fi}]`);
@@ -92,7 +96,7 @@ export function eslintAdapter(input: AdapterInput): FindingDraft[] {
       const line = int(m["line"], "eslint line", 1);
       const end = int(m["endLine"], "eslint endLine", line);
       out.push({
-        ...base("lint", "eslint", input.toolVersion),
+        ...base("lint", lintTool("eslint", mode), input.toolVersion),
         rule_id: fatal ? "parse-error" : str(m["ruleId"], "eslint ruleId"),
         category: "quality",
         file, line, end_line: end,
@@ -100,7 +104,7 @@ export function eslintAdapter(input: AdapterInput): FindingDraft[] {
         tool_severity: fatal ? "fatal" : String(int(m["severity"], "eslint severity")),
         snippet: excerpt(input.snippet, file, line, end),
         raw_ref: `${input.rawRef}#/${fi}/messages/${mi}`,
-        tags: ["lint-mode:baseline"],
+        tags: [`lint-mode:${mode}`],
       });
     });
   });
@@ -108,7 +112,7 @@ export function eslintAdapter(input: AdapterInput): FindingDraft[] {
 }
 
 /** ruff `--output-format json` (array of diagnostics). ruff has no severity: every diagnostic is "error". */
-export function ruffAdapter(input: AdapterInput): FindingDraft[] {
+export function ruffAdapter(input: AdapterInput, mode: LintMode = "baseline"): FindingDraft[] {
   return arr(parseJson(input.raw, "ruff"), "ruff").map((entry, i) => {
     const d = obj(entry, `ruff[${i}]`);
     const loc = obj(d["location"], `ruff[${i}].location`);
@@ -118,7 +122,7 @@ export function ruffAdapter(input: AdapterInput): FindingDraft[] {
     const end = int(endLoc["row"], "ruff end row", line);
     const code = d["code"];
     return {
-      ...base("lint", "ruff", input.toolVersion),
+      ...base("lint", lintTool("ruff", mode), input.toolVersion),
       rule_id: typeof code === "string" ? code : "syntax-error",
       category: "quality" as const,
       file, line, end_line: end,
@@ -126,7 +130,7 @@ export function ruffAdapter(input: AdapterInput): FindingDraft[] {
       tool_severity: "error",
       snippet: excerpt(input.snippet, file, line, end),
       raw_ref: `${input.rawRef}#/${i}`,
-      tags: ["lint-mode:baseline"],
+      tags: [`lint-mode:${mode}`],
     };
   });
 }

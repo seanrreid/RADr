@@ -26,8 +26,11 @@ import { EventLog } from "../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
 import { Gates } from "../state/gates.js";
 import { osvRoot, readSnapshotsLock, verifySnapshot } from "../toolchain/db.js";
-import { buildLock, diffLocks, doctor, readLock, type ToolCheck } from "../toolchain/doctor.js";
+import { buildLock, diffLocks, doctor, readLock, type ToolCheck, type ToolchainLock } from "../toolchain/doctor.js";
 import { nodeToolsDir } from "../toolchain/install.js";
+import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
+import { verifyDeps } from "../sandbox/deps.js";
+import { SANDBOX_LANES } from "../engagement/config.js";
 
 export interface LaneSummary {
   readonly lane: string;
@@ -68,25 +71,26 @@ interface ToolProblems {
 }
 
 /** Tools that are missing, or whose live state differs from the engagement's toolchain.lock. */
-function toolProblems(l: Layout, checks: readonly ToolCheck[]): ToolProblems {
+function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: ToolchainLock["sandbox"]): ToolProblems {
   const byTool = new Map<string, "tool-missing" | "version-drift">();
   const unhealthy = checks.filter((c) => c.state !== "ok");
   if (unhealthy.length > 0) {
     for (const c of unhealthy) byTool.set(c.tool, c.state === "missing" ? "tool-missing" : "version-drift");
     return { byTool, lines: unhealthy.map((c) => `${c.tool}: ${c.state} (${c.detail})`) };
   }
-  const lines = diffLocks(readLock(l.toolchainLock), buildLock(checks));
+  const lines = diffLocks(readLock(l.toolchainLock), buildLock(checks, liveSandbox));
   for (const line of lines) {
     const name = line.split(":")[0] ?? "";
     if (name.startsWith("config ruff")) byTool.set("ruff", "version-drift");
     else if (name.startsWith("config eslint") || name === "node-tools") byTool.set("node-tools", "version-drift");
     else if (name === "platform") for (const c of checks) byTool.set(c.tool, "version-drift");
+    else if (name === "sandbox") byTool.set("sandbox", liveSandbox === null ? "tool-missing" : "version-drift");
     else byTool.set(name, "version-drift");
   }
   return { byTool, lines };
 }
 
-function toolbox(home: string, l: Layout, checks: readonly ToolCheck[]): Toolbox {
+function toolbox(home: string, l: Layout, checks: readonly ToolCheck[], runtime: Runtime | undefined): Toolbox {
   const bins: Record<string, string> = {};
   const versions: Record<string, string> = {};
   for (const c of checks) {
@@ -99,10 +103,15 @@ function toolbox(home: string, l: Layout, checks: readonly ToolCheck[]): Toolbox
     verifySnapshot(home, snap.id);
     osvDb = path.join(osvRoot(home), snap.id);
   }
-  return { bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml") };
+  const deps = readSnapshotsLock(l.snapshotsLock).deps;
+  const depsCache = deps === undefined || deps === null ? null : verifyDeps(home, l.id, deps.id);
+  return {
+    bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"),
+    sandbox: runtime === undefined ? null : { runtime, depsCache },
+  };
 }
 
-export async function review(home: string, l: Layout, actor: string, clock: Clock): Promise<ReviewResult> {
+export async function review(home: string, l: Layout, actor: string, clock: Clock, env: NodeJS.ProcessEnv = {}): Promise<ReviewResult> {
   const log = new EventLog(l.events, clock);
   const gates = Gates.load();
   const matrix = Matrix.load();
@@ -110,8 +119,12 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const rubric = loadRubric(doc.rubric);
 
   const checks = await doctor(home);
-  const problems = toolProblems(l, checks);
-  const tools = toolbox(home, l, checks);
+  // Probe for a container runtime only when this scope uses the sandbox (probing can take seconds).
+  const lockedSandbox = readLock(l.toolchainLock).sandbox;
+  const usesSandbox = (lockedSandbox !== undefined && lockedSandbox !== null) || doc.lanes.some((x) => SANDBOX_LANES.includes(x));
+  const runtime = usesSandbox ? await detectRuntime(env) : undefined;
+  const problems = toolProblems(l, checks, usesSandbox ? sandboxLockEntry(runtime) : null);
+  const tools = toolbox(home, l, checks, runtime);
 
   const runNumber = log.read().filter((e) => e.type === "run-started").length + 1;
   const runId = `R-${String(runNumber).padStart(4, "0")}`;

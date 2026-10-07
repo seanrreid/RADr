@@ -29,3 +29,5 @@ jobs:
         run: node --test "dist/test/**/*.test.js"
         env:
           RADR_E2E_TOOLS: ${{ runner.temp }}/radr-tools
+          # The sandbox e2e needs a container runtime; GitHub's Linux runners have Docker.
+          RADR_E2E_SANDBOX: ${{ runner.os == 'Linux' && '1' || '0' }}

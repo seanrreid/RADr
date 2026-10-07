@@ -85,11 +85,13 @@ export interface SnapshotsLock {
   /** EPSS / KEV (M2). Absent in M1-era locks; null = not pinned (fail-open, no promotion). */
   readonly epss?: { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string } | null;
   readonly kev?: { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string } | null;
+  /** Dependency cache for offline sandbox installs (M2). null = none warmed. */
+  readonly deps?: { readonly id: string; readonly tree_hash: string } | null;
 }
 
 type PinnedContextSnap = { readonly id: string; readonly fetched_at: string; readonly sha256: string; readonly published: string };
 
-export function buildSnapshotsLock(info: SnapshotInfo | undefined, epss?: ContextSnapshot, kev?: ContextSnapshot): SnapshotsLock {
+export function buildSnapshotsLock(info: SnapshotInfo | undefined, epss?: ContextSnapshot, kev?: ContextSnapshot, deps?: { id: string; tree_hash: string }): SnapshotsLock {
   const pin = (s: ContextSnapshot | undefined): PinnedContextSnap | null =>
     s === undefined ? null : { id: s.id, fetched_at: s.fetched_at, sha256: s.sha256, published: s.published };
   let osv: SnapshotsLock["osv"] = null;
@@ -98,11 +100,11 @@ export function buildSnapshotsLock(info: SnapshotInfo | undefined, epss?: Contex
     for (const [eco, e] of Object.entries(info.ecosystems)) ecosystems[eco] = e.sha256;
     osv = { id: info.id, fetched_at: info.fetched_at, ecosystems };
   }
-  return { version: 1, osv, epss: pin(epss), kev: pin(kev) };
+  return { version: 1, osv, epss: pin(epss), kev: pin(kev), deps: deps === undefined ? null : { id: deps.id, tree_hash: deps.tree_hash } };
 }
 
 export function writeSnapshotsLock(file: string, lock: SnapshotsLock): void {
-  writeFileSync(file, `# snapshots.lock: written by radr; part of the scope fingerprint. Do not edit.\n${stringify(lock, { lineWidth: 0 })}`);
+  writeFileSync(file, `# snapshots.lock: written by radr; part of the scope fingerprint. Do not edit.\n${stringify(lock, { lineWidth: 0, aliasDuplicateObjects: false })}`);
 }
 
 export function readSnapshotsLock(file: string): SnapshotsLock {

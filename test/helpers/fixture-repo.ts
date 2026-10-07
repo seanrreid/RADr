@@ -113,3 +113,75 @@ export async function makeFixtureRepo(dir: string): Promise<FixtureRepo> {
 
   return { dir, commits };
 }
+
+/**
+ * Sandbox fixture (M2): a buildable TS/JS + Python project with real tests, one dependency per
+ * stack (exercising the offline cache), and one deliberate type error per stack.
+ */
+export const SANDBOX_FILES: Readonly<Record<string, string>> = {
+  "package.json": `{
+  "name": "sbx-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "test": "node --test" },
+  "dependencies": { "is-number": "7.0.0" }
+}
+`,
+  "package-lock.json": `{
+  "name": "sbx-fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": { "name": "sbx-fixture", "version": "1.0.0", "dependencies": { "is-number": "7.0.0" } },
+    "node_modules/is-number": {
+      "version": "7.0.0",
+      "resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+      "integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+      "license": "MIT",
+      "engines": { "node": ">=0.12.0" }
+    }
+  }
+}
+`,
+  "tsconfig.json": `{ "compilerOptions": { "strict": true, "noEmit": true, "target": "ES2022", "module": "commonjs" }, "include": ["src/**/*.ts"] }
+`,
+  "src/math.ts": `export const answer: number = "forty-two";
+`,
+  "index.js": `const isNumber = require("is-number");
+exports.add = (a, b) => {
+  if (!isNumber(a) || !isNumber(b)) throw new Error("not a number");
+  return a + b;
+};
+exports.unused = () => 42;
+`,
+  "test/add.test.js": `const test = require("node:test");
+const assert = require("node:assert");
+const { add } = require("../index.js");
+test("adds", () => assert.equal(add(1, 2), 3));
+`,
+  "requirements.txt": "six==1.17.0\n",
+  "app/__init__.py": "",
+  "app/calc.py": `def add(a: int, b: int) -> int:
+    return a + b
+
+
+def broken() -> int:
+    return "not an int"
+`,
+  "tests/test_calc.py": `from app.calc import add
+
+
+def test_add():
+    assert add(2, 3) == 5
+`,
+};
+
+export async function makeSandboxFixtureRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-02-01T00:00:00Z");
+  for (const [rel, content] of Object.entries(SANDBOX_FILES)) write(dir, rel, content);
+  await g(dir, ["add", "-A"], "2026-02-01T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "buildable fixture"], "2026-02-01T10:00:00Z");
+  return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-02-01T10:00:00Z")] };
+}

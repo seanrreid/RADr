@@ -73,3 +73,20 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+  # Sandboxed lanes (run client code). A failed install is a FINDING, not an outcome.
+  types:
+    success:       { action: continue }
+    tool-missing:  { action: partial }   # no runtime / no deps snapshot: report the gap, keep going
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  coverage:
+    success:       { action: continue }
+    tool-missing:  { action: partial }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
