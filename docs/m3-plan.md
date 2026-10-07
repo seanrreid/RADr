@@ -263,6 +263,6 @@ records every file, and `check-rules` re-verifies it in CI.
 - Coverage percentages for Rust, JVM, PHP, Ruby and .NET need per-project build
   configuration (cargo-llvm-cov, JaCoCo, pcov, SimpleCov, coverlet).
 - The LGPL sub-pack is pending counsel.
-- The package license is still UNLICENSED.
+- ~~Package license~~: resolved, MIT (LICENSE).
 - Per-test flaky detection (today a whole run is compared to a whole run).
 - Kotlin lint (detekt) and Gradle builds without a wrapper.
