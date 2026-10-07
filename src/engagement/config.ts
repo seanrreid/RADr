@@ -10,7 +10,9 @@ import { GIT_SHA, SLUG, makeValidator } from "../schemas/validate.js";
 export const ENGAGEMENT_TYPES = ["triage", "quality", "health-audit", "security", "due-diligence", "pr-review", "debug"] as const;
 export const TIERS = ["triage", "standard", "deep", "diff"] as const;
 /** Lanes implemented in M1. Later milestones extend this list (and policy/matrix.yml). */
-export const LANES = ["census", "lint", "secrets", "sca"] as const;
+export const LANES = ["census", "lint", "secrets", "sca", "history", "tests"] as const;
+/** The triage tier runs this fixed set (PRD §5): fast, static, no sandbox. */
+export const TRIAGE_LANES: readonly (typeof LANES)[number][] = ["census", "lint", "secrets", "sca", "history", "tests"];
 export const STACKS = ["typescript-javascript", "python"] as const;
 
 export interface EngagementDoc {
@@ -74,6 +76,10 @@ export function parseEngagement(text: string, source: string): EngagementDoc {
   const doc = validate(parseYaml(text, source), source);
   if (doc.llm_policy !== "off") {
     throw new UsageError(`${source}: llm_policy "${doc.llm_policy}" is not available until M4; use "off"`);
+  }
+  if (doc.tier === "triage") {
+    const same = doc.lanes.length === TRIAGE_LANES.length && TRIAGE_LANES.every((x) => doc.lanes.includes(x));
+    if (!same) throw new UsageError(`${source}: the triage tier runs a fixed lane set: [${TRIAGE_LANES.join(", ")}]`);
   }
   if (doc.network.enforcement === "container") {
     throw new UsageError(`${source}: network enforcement "container" requires container mode (M3); use "declared"`);

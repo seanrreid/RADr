@@ -39,7 +39,10 @@ export function readStore(file: string): { findings: Finding[]; runs: RunFinding
     else if (type === "run-findings") runs.push(rec as RunFindings);
     else throw new RefusedError(`${file}:${i + 1}: unknown record type`);
   });
-  return { findings, runs };
+  // A finding id may have several records (re-assessed across runs): the latest one wins.
+  const latest = new Map<string, Finding>();
+  for (const f of findings) latest.set(f.id, f);
+  return { findings: [...latest.values()], runs };
 }
 
 /** Identity key before occurrence numbering: engine fingerprint, else tool+rule+path+code. */
@@ -75,6 +78,8 @@ export function fingerprintDrafts(drafts: readonly FindingDraft[]): Fingerprinte
 export interface IngestResult {
   readonly present: Finding[];
   readonly added: number;
+  /** Existing findings whose assessment or location changed (appended as new records). */
+  readonly updated: number;
   readonly outOfScope: number;
   readonly setHash: string;
 }
@@ -89,29 +94,30 @@ export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: 
 
   const present: Finding[] = [];
   const added: Finding[] = [];
+  const updated: Finding[] = [];
   for (const p of stableSort(prints, (x) => x.fingerprint)) {
     const existing = byFingerprint.get(p.fingerprint);
-    if (existing !== undefined) {
-      present.push(existing);
-      continue;
-    }
+    // Identity (id, fingerprint) is stable; everything else is re-derived every run, because
+    // severity depends on the rubric and vulnerability context (both fingerprinted in scope)
+    // and locations move with the code.
     const finding: Finding = {
       ...p.draft,
       type: "finding",
-      id: `F-${String(nextId++).padStart(ID_WIDTH, "0")}`,
+      id: existing?.id ?? `F-${String(nextId++).padStart(ID_WIDTH, "0")}`,
       fingerprint: p.fingerprint,
       class: "tool",
       ...rubric.assess(p.draft, vulns),
       rubric_version: rubric.version,
       snippet_hash: p.snippetHash,
     };
-    added.push(finding);
+    if (existing === undefined) added.push(finding);
+    else if (contentHash(existing) !== contentHash(finding)) updated.push(finding);
     present.push(finding);
   }
   const ids = stableSort(present.map((f) => f.id), (id) => id);
-  const lines = [...added, { type: "run-findings", run_id: runId, finding_ids: ids } satisfies RunFindings].map((r) => `${canonicalJson(r)}\n`);
+  const lines = [...added, ...updated, { type: "run-findings", run_id: runId, finding_ids: ids } satisfies RunFindings].map((r) => `${canonicalJson(r)}\n`);
   appendFileSync(file, lines.join(""));
-  return { present, added: added.length, outOfScope: drafts.length - inScopeDrafts.length, setHash: findingsSetHash(present) };
+  return { present, added: added.length, updated: updated.length, outOfScope: drafts.length - inScopeDrafts.length, setHash: findingsSetHash(present) };
 }
 
 /**
@@ -132,4 +138,10 @@ export function latestRunFindings(file: string): { runId: string | null; finding
   if (last === undefined) return { runId: null, findings: [] };
   const ids = new Set(last.finding_ids);
   return { runId: last.run_id, findings: findings.filter((f) => ids.has(f.id)) };
+}
+
+/** Compare findings ignoring the run-specific evidence pointer. */
+function contentHash(f: Finding): string {
+  const { raw_ref: _rawRef, ...content } = f;
+  return hash(content);
 }

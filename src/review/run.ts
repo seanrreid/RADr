@@ -19,7 +19,8 @@ import { Matrix, runStatus } from "../matrix/matrix.js";
 import { autoConfirms, loadRubric, type Rubric } from "../rubric/rubric.js";
 import { dispositions, stateOf } from "../findings/disposition.js";
 import type { Finding } from "../findings/types.js";
-import { stableSort } from "../core/determinism.js";
+import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { loadVulnContext } from "../toolchain/vulnctx.js";
 import { EventLog } from "../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
@@ -121,6 +122,7 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const drafts: FindingDraft[] = [];
   const terminal: ("continue" | "partial" | "abort")[] = [];
   let census: Readonly<Record<string, unknown>> | undefined;
+  const laneMetrics: Record<string, Readonly<Record<string, unknown>>> = {};
 
   for (const id of lanes) {
     const lane = LANES[id];
@@ -138,11 +140,13 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
       const problem = lane.tools.map((t) => problems.byTool.get(t)).find((p) => p !== undefined);
       const result = problem !== undefined
         ? { outcome: problem, tools: [], findings: [], detail: problems.lines.join("; ") }
-        : await lane.run({ layout: l, doc, runId, attempt, tools });
+        : await lane.run({ layout: l, doc, runId, attempt, tools, metrics: laneMetrics });
       const resolved = matrix.resolve(id, result.outcome, attempt);
+      const stored = result.metrics !== undefined && resolved.action !== "retry" ? storeMetrics(l, runId, id, result.metrics) : undefined;
       log.append("lane-completed", actor, {
         run_id: runId, lane: id, attempt, outcome: result.outcome, action: resolved.action, tools: [...result.tools],
         ...(result.detail !== undefined ? { detail: result.detail } : {}),
+        ...(stored !== undefined ? { metrics_ref: stored.ref, metrics_hash: stored.hash } : {}),
       });
       if (resolved.action === "retry") {
         attempt = resolved.nextAttempt ?? attempt + 1;
@@ -150,6 +154,7 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
       }
       terminal.push(resolved.action);
       if (resolved.action !== "abort") drafts.push(...result.findings);
+      if (result.metrics !== undefined && resolved.action !== "abort") laneMetrics[id] = result.metrics;
       if (id === "census" && result.metrics !== undefined) census = result.metrics;
       summaries.push({
         lane: id, outcome: result.outcome, action: resolved.action, attempts: attempt, findings: result.findings.length,
@@ -186,6 +191,26 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash,
     autoConfirmed, notes, ...(census !== undefined ? { census } : {}),
   };
+}
+
+/** metrics/<run>/<lane>.json in canonical JSON; the event records its path and hash. */
+function storeMetrics(l: Layout, runId: string, lane: string, metrics: Readonly<Record<string, unknown>>): { ref: string; hash: string } {
+  const dir = path.join(l.dir, "metrics", runId);
+  mkdirSync(dir, { recursive: true });
+  const body = canonicalJson(metrics);
+  writeFileSync(path.join(dir, `${lane}.json`), body);
+  return { ref: `metrics/${runId}/${lane}.json`, hash: hashBytes(body) };
+}
+
+/** Metrics a run stored, by lane (for the scorecard and the report). */
+export function readRunMetrics(l: Layout, runId: string): Record<string, Readonly<Record<string, unknown>>> {
+  const dir = path.join(l.dir, "metrics", runId);
+  const out: Record<string, Readonly<Record<string, unknown>>> = {};
+  if (!existsSync(dir)) return out;
+  for (const f of stableSort(readdirSync(dir).filter((n) => n.endsWith(".json")), (n) => n)) {
+    out[f.slice(0, -".json".length)] = JSON.parse(readFileSync(path.join(dir, f), "utf8")) as Record<string, unknown>;
+  }
+  return out;
 }
 
 /**

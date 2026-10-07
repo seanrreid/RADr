@@ -143,17 +143,22 @@ export function gitleaksAdapter(input: AdapterInput & { readonly presentAtHead: 
     const file = repoPath(str(g["File"], `gitleaks[${i}].File`), input.repoRoot);
     const commit = str(g["Commit"], `gitleaks[${i}].Commit`);
     const line = int(g["StartLine"], "gitleaks StartLine");
+    const rule = str(g["RuleID"], `gitleaks[${i}].RuleID`);
+    const description = str(g["Description"], `gitleaks[${i}].Description`);
+    // `gitleaks dir` (triage, HEAD only) has no commit, and its Fingerprint embeds the ABSOLUTE
+    // path, which differs per engagement home. Rebuild it from the repo-relative path instead.
+    const headOnly = commit === "";
     return {
       ...base("secrets", "gitleaks", input.toolVersion),
-      rule_id: str(g["RuleID"], `gitleaks[${i}].RuleID`),
+      rule_id: rule,
       category: "secrets" as const,
       file, line, end_line: int(g["EndLine"], "gitleaks EndLine", line),
-      message: `${str(g["Description"], `gitleaks[${i}].Description`)} (introduced in commit ${commit.slice(0, 12)})`,
+      message: headOnly ? `${description} (in the current tree)` : `${description} (introduced in commit ${commit.slice(0, 12)})`,
       tool_severity: "secret",
       snippet: null,
-      engine_fingerprint: str(g["Fingerprint"], `gitleaks[${i}].Fingerprint`),
+      engine_fingerprint: headOnly ? `${file}:${rule}:${line}` : str(g["Fingerprint"], `gitleaks[${i}].Fingerprint`),
       raw_ref: `${input.rawRef}#/${i}`,
-      tags: [`commit:${commit}`, input.presentAtHead(file) ? "present-at-head" : "history-only"],
+      tags: headOnly ? ["present-at-head"] : [`commit:${commit}`, input.presentAtHead(file) ? "present-at-head" : "history-only"],
     };
   });
 }
@@ -208,18 +213,42 @@ export function osvAdapter(input: AdapterInput): FindingDraft[] {
   return out;
 }
 
-/** scc `--format json`: per-language integer metrics (census; no findings). */
-export function sccMetrics(raw: string): Record<string, unknown> {
+export type FileMetric = {
+  readonly language: string;
+  readonly code: number;
+  readonly complexity: number;
+};
+
+export type CensusMetrics = {
+  readonly languages: Readonly<Record<string, { files: number; lines: number; code: number; comment: number; blank: number; complexity: number }>>;
+  readonly totals: { files: number; lines: number; code: number; comment: number; blank: number; complexity: number };
+  /** Per-file metrics (repo-relative POSIX path → metric), present when scc ran with --by-file. */
+  readonly files: Readonly<Record<string, FileMetric>>;
+};
+
+/** scc `--format json [--by-file]`: per-language and per-file integer metrics (census; no findings). */
+export function sccMetrics(raw: string): CensusMetrics {
   const langs = arr(parseJson(raw, "scc"), "scc").map((e, i) => obj(e, `scc[${i}]`));
-  const languages: Record<string, unknown> = {};
+  const languages: Record<string, CensusMetrics["totals"]> = {};
   const totals = { files: 0, lines: 0, code: 0, comment: 0, blank: 0, complexity: 0 };
+  const files: Record<string, FileMetric> = {};
   for (const l of langs) {
+    const name = str(l["Name"], "scc Name");
     const row = {
       files: int(l["Count"], "scc Count"), lines: int(l["Lines"], "scc Lines"), code: int(l["Code"], "scc Code"),
       comment: int(l["Comment"], "scc Comment"), blank: int(l["Blank"], "scc Blank"), complexity: int(l["Complexity"], "scc Complexity"),
     };
-    languages[str(l["Name"], "scc Name")] = row;
+    languages[name] = row;
     for (const k of Object.keys(totals) as (keyof typeof totals)[]) totals[k] += row[k];
+    const perFile = l["Files"] === null || l["Files"] === undefined ? [] : arr(l["Files"], "scc Files");
+    perFile.forEach((fe, fi) => {
+      const f = obj(fe, `scc ${name} Files[${fi}]`);
+      const loc = str(f["Location"], "scc Location").replace(/^\.\//, "");
+      if (loc.startsWith("/") || loc.split("/").includes("..")) throw new ParseError(`scc: unexpected file location "${loc}"`);
+      files[loc] = { language: name, code: int(f["Code"], "scc file Code"), complexity: int(f["Complexity"], "scc file Complexity") };
+    });
   }
-  return { languages, totals };
+  const sortedFiles: Record<string, FileMetric> = {};
+  for (const k of stableSort(Object.keys(files), (x) => x)) sortedFiles[k] = files[k] as FileMetric;
+  return { languages, totals, files: sortedFiles };
 }

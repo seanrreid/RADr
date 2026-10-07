@@ -40,6 +40,8 @@ export interface LaneContext {
   readonly runId: string;
   readonly attempt: number;
   readonly tools: Toolbox;
+  /** Metrics from lanes that already completed in this run (e.g. census → history, tests). */
+  readonly metrics: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 export interface LaneResult {

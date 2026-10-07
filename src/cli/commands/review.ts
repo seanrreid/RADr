@@ -10,6 +10,8 @@ import { checkTransition, dispositions, isState, stateOf } from "../../findings/
 import { findingsSetHash, latestRunFindings, readStore } from "../../findings/store.js";
 import { SEVERITIES, type Finding } from "../../findings/types.js";
 import { review as runReview } from "../../review/run.js";
+import { computeScorecard } from "../../address/scorecard.js";
+import { loadRunInputs } from "../../address/inputs.js";
 import { EventLog } from "../../state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../../state/fingerprint.js";
 import { Gates } from "../../state/gates.js";
@@ -174,5 +176,24 @@ export const status: CommandSpec = {
     const byState = ["pending", "confirmed", "dismissed", "waived"].map((s) => `${s}=${present.filter((f) => stateOf(states, f.id) === s).length}`).join(" ");
     ctx.out(`  findings ${present.length}: ${bySev}`);
     ctx.out(`  states:  ${byState}`);
+  },
+};
+
+export const scorecard: CommandSpec = {
+  name: "scorecard",
+  usage: "radr scorecard [-e <id>] [--json]",
+  summary: "triage scorecard for the latest run (rubric v1)",
+  run(args, ctx) {
+    const { values } = parse(args, { ...ENGAGEMENT_OPTION, json: { type: "boolean" } }, 0);
+    const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+    const inp = loadRunInputs(l, ctx.clock);
+    if (inp.rubric.scorecard === undefined) throw new RefusedError(`rubric ${inp.rubric.version} has no scorecard (use rubric v1)`);
+    const card = computeScorecard(inp.rubric.scorecard, inp);
+    if (values.json === true) {
+      ctx.out(canonicalJson({ run_id: inp.runId, verdict: card.verdict, rows: card.rows.map((r) => ({ ...r })) }));
+      return;
+    }
+    ctx.out(`scorecard ${l.id} (run ${inp.runId}): ${card.verdict.toUpperCase()}`);
+    for (const r of card.rows) ctx.out(`  ${r.rating.padEnd(6)} ${r.label.padEnd(54)} ${r.value === null ? "unavailable" : String(r.value)}`);
   },
 };

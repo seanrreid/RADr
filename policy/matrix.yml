@@ -57,3 +57,19 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+  history:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  tests:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }

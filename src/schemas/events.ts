@@ -54,6 +54,8 @@ const PAYLOADS = {
         ),
       },
       detail: { type: "string" },
+      metrics_ref: str,
+      metrics_hash: sha,
     },
     ["run_id", "lane", "attempt", "outcome", "action", "tools"],
   ),

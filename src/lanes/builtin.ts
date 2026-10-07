@@ -8,6 +8,7 @@ import type { FindingDraft } from "../findings/types.js";
 import { ParseError, eslintAdapter, gitleaksAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../normalize/adapters.js";
 import { ESLINT_BASELINE } from "../toolchain/install.js";
 import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type LaneContext, type LaneOutcome, type LaneResult, type ToolRun } from "./lane.js";
+import { history, tests } from "./metrics.js";
 
 /** Most severe first: a lane with several tools reports the worst of their outcomes. */
 const OUTCOME_RANK: readonly LaneOutcome[] = ["tool-missing", "version-drift", "tool-error", "timeout", "output-cap", "parse-error", "success"];
@@ -75,7 +76,7 @@ export const census: Lane = {
   async run(ctx) {
     let metrics: Record<string, unknown> | undefined;
     const s = await step(ctx, "census", "scc", "scc.json",
-      () => run({ command: bin(ctx, "scc"), args: ["--format", "json", "--no-cocomo", "--no-gitignore", "--no-ignore", "."], cwd: ctx.layout.worktree, env: toolEnv(ctx) }),
+      () => run({ command: bin(ctx, "scc"), args: ["--format", "json", "--no-cocomo", "--by-file", "--no-gitignore", "--no-ignore", "."], cwd: ctx.layout.worktree, env: toolEnv(ctx) }),
       (raw) => { metrics = sccMetrics(raw); return []; });
     return combine([s], metrics);
   },
@@ -122,7 +123,10 @@ export const secrets: Lane = {
     const wt = realWorktree(ctx);
     const r = await run({
       command: bin(ctx, "gitleaks"),
-      args: ["git", `--log-opts=${sha}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
+      // Triage scans HEAD only (PRD §5); every other tier scans the approved SHA's full history.
+      args: ctx.doc.tier === "triage"
+        ? ["dir", "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", wt]
+        : ["git", `--log-opts=${sha}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
       cwd: ctx.layout.dir, env: toolEnv(ctx),
     });
     // gitleaks writes its report to a file; stdout holds only logs. Hash and adapt the report.
@@ -168,4 +172,4 @@ export const sca: Lane = {
   },
 };
 
-export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca };
+export const LANES: Readonly<Record<string, Lane>> = { census, lint, secrets, sca, history, tests };
