@@ -26,22 +26,26 @@ export const init: CommandSpec = {
 
 export const scope: CommandSpec = {
   name: "scope",
-  usage: "radr scope [-e <id>] [--source <path|url>] [--rev <commit-ish>]",
-  summary: "mirror the source, detect stacks, write engagement.yml",
+  usage: "radr scope [-e <id>] [--source <path|url>] [--rev <rev>] [--snapshot <id>]",
+  summary: "mirror the source, detect stacks, write engagement.yml + locks",
   async run(args, ctx) {
-    const { values } = parse(args, { ...ENGAGEMENT_OPTION, source: { type: "string" }, rev: { type: "string" } }, 0);
-    const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+    const { values } = parse(args, { ...ENGAGEMENT_OPTION, source: { type: "string" }, rev: { type: "string" }, snapshot: { type: "string" } }, 0);
+    const home = radrHome(ctx.env);
+    const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
     const r = await proposeScope({
       layout: l,
+      home,
       actor: await resolveActor(ctx.env),
       clock: ctx.clock,
       ...(values.source !== undefined ? { source: values.source } : {}),
       ...(values.rev !== undefined ? { rev: values.rev } : {}),
+      ...(values.snapshot !== undefined ? { snapshot: values.snapshot } : {}),
     });
     ctx.out(`${r.created ? "proposed" : "updated"} scope for ${l.id} at ${r.doc.source.sha}`);
     ctx.out(`  stacks: ${r.doc.stacks.join(", ") || "(none detected)"}`);
     if (r.detection.unsupported.length > 0) ctx.out(`  not yet supported (M3): ${r.detection.unsupported.join(", ")}`);
     ctx.out(`  fingerprint: ${r.fingerprint}`);
+    for (const w of r.warnings) ctx.out(`  warning: ${w}`);
     ctx.out(`review ${l.engagementYml}, then: radr approve scope -e ${l.id}`);
   },
 };

@@ -1,0 +1,11 @@
+{
+  "name": "radr-node-tools",
+  "private": true,
+  "description": "Pinned ESLint toolset for radr's baseline lint mode. Installed with npm ci --ignore-scripts.",
+  "dependencies": {
+    "eslint": "10.12.0",
+    "@eslint/js": "10.0.1",
+    "@typescript-eslint/parser": "8.71.1",
+    "typescript": "6.0.3"
+  }
+}

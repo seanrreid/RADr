@@ -16,6 +16,7 @@ import { EventLog } from "../../src/state/events.js";
 import { readScopeInputs, scopeFingerprint } from "../../src/state/fingerprint.js";
 import { Gates } from "../../src/state/gates.js";
 import { cliRunner } from "../helpers/cli.js";
+import { seedHome } from "../helpers/fake-toolchain.js";
 import { makeFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 
@@ -156,8 +157,27 @@ client_licenses: []
 });
 
 describe("CLI: init → scope → approve (T2.4, T2.5, AC7, AC8)", () => {
+  it("refuses approval until the toolchain and snapshot locks exist", async () => {
+    const home = tmpDir();
+    const radr = cliRunner(home);
+    await radr("init", "acme", "audit");
+    const scoped = await radr("scope", "-e", "acme-audit", "--source", fixture.dir);
+    assert.equal(scoped.code, 0, scoped.err);
+    assert.match(scoped.out, /warning: toolchain not ready/);
+    assert.match(scoped.out, /warning: no OSV vulnerability DB snapshot/);
+    const approved = await radr("approve", "scope", "-e", "acme-audit");
+    assert.equal(approved.code, 1);
+    assert.match(approved.err, /no toolchain\.lock/);
+
+    await seedHome(home);
+    assert.equal((await radr("scope", "-e", "acme-audit")).code, 0);
+    const again = await radr("approve", "scope", "-e", "acme-audit");
+    assert.equal(again.code, 0, again.err);
+  });
+
   it("runs the Gate 1 flow and the gate tracks scope edits", async () => {
     const home = tmpDir();
+    await seedHome(home);
     const radr = cliRunner(home);
     assert.equal((await radr("init", "acme", "audit")).code, 0);
 
@@ -183,7 +203,7 @@ describe("CLI: init → scope → approve (T2.4, T2.5, AC7, AC8)", () => {
     writeFileSync(l.snapshotsLock, "osv: changed\n");
     assert.equal(gates.evaluate("scope", events(), { fingerprint: current() }).passed, false);
 
-    assert.deepEqual(events().map((e) => e.type), ["engagement-created", "source-mirrored", "scope-proposed", "scope-approved"]);
+    assert.deepEqual(events().map((e) => e.type), ["engagement-created", "source-mirrored", "toolchain-locked", "scope-proposed", "scope-approved"]);
   });
 
   it("re-scoping to another commit keeps consultant edits and moves the worktree", async () => {

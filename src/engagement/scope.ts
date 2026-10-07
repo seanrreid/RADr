@@ -1,7 +1,10 @@
 // `radr scope` (T2.4) and `radr approve scope` (T2.5).
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import { hashBytes } from "../core/determinism.js";
+import { buildSnapshotsLock, listSnapshots, verifySnapshot, writeSnapshotsLock } from "../toolchain/db.js";
+import { buildLock, doctor, writeLock } from "../toolchain/doctor.js";
 import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
 import { EventLog } from "../state/events.js";
@@ -19,6 +22,10 @@ export interface ScopeRequest {
   readonly source?: string;
   /** Commit-ish to scope; defaults to the source's HEAD. */
   readonly rev?: string;
+  /** RADR_HOME, for the toolchain and vulnerability-DB snapshots. */
+  readonly home: string;
+  /** OSV snapshot id to pin; defaults to the newest. */
+  readonly snapshot?: string;
 }
 
 export interface ScopeResult {
@@ -26,6 +33,8 @@ export interface ScopeResult {
   readonly fingerprint: string;
   readonly detection: Detection;
   readonly created: boolean;
+  /** Why a lock could not be written yet (approval will refuse until fixed). */
+  readonly warnings: readonly string[];
 }
 
 export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
@@ -66,10 +75,42 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
         client_licenses: [],
       };
   writeEngagement(l.engagementYml, doc);
+  const warnings = await writeLocks(req, doc, log);
 
   const fingerprint = scopeFingerprint(readScopeInputs(l));
   log.append("scope-proposed", req.actor, { fingerprint, engagement_hash: engagementHash(doc) });
-  return { doc, fingerprint, detection, created: existing === undefined };
+  return { doc, fingerprint, detection, created: existing === undefined, warnings };
+}
+
+/**
+ * Write toolchain.lock and snapshots.lock for the scope. A lock that can't be written yet (tools
+ * not installed, no DB snapshot) is removed, not left stale, and reported as a warning;
+ * approveScope refuses until it exists.
+ */
+async function writeLocks(req: ScopeRequest, doc: EngagementDoc, log: EventLog): Promise<string[]> {
+  const l = req.layout;
+  const warnings: string[] = [];
+  try {
+    const lock = buildLock(await doctor(req.home));
+    writeLock(l.toolchainLock, lock);
+    log.append("toolchain-locked", req.actor, { lock_hash: hashBytes(readFileSync(l.toolchainLock)), mode: lock.mode });
+  } catch (e) {
+    if (!(e instanceof RefusedError)) throw e;
+    rmSync(l.toolchainLock, { force: true });
+    warnings.push(`${e.message}; run \`radr tools install\`, then \`radr scope\` again`);
+  }
+
+  const needsOsv = doc.lanes.includes("sca");
+  const snapshots = listSnapshots(req.home);
+  const chosen = req.snapshot !== undefined ? verifySnapshot(req.home, req.snapshot) : snapshots.at(-1);
+  if (chosen !== undefined) verifySnapshot(req.home, chosen.id);
+  if (needsOsv && chosen === undefined) {
+    rmSync(l.snapshotsLock, { force: true });
+    warnings.push("no OSV vulnerability DB snapshot (needed by the sca lane); run `radr db sync`, then `radr scope` again");
+  } else {
+    writeSnapshotsLock(l.snapshotsLock, buildSnapshotsLock(needsOsv ? chosen : undefined));
+  }
+  return warnings;
 }
 
 /** URLs and scp-style remotes (git@host:path) pass through; local paths become absolute. */
@@ -87,6 +128,8 @@ export async function approveScope(l: Layout, actor: string, clock: Clock): Prom
     const hint = ` (if you edited source.sha, run \`radr scope --rev ${sha}\` first)`;
     throw e instanceof RefusedError ? new RefusedError(e.message + hint) : e;
   }
+  if (inputs.toolchainLockHash === null) throw new RefusedError("no toolchain.lock: run `radr tools install`, then `radr scope` again");
+  if (inputs.snapshotsLockHash === null) throw new RefusedError("no snapshots.lock: run `radr db sync`, then `radr scope` again");
   const fingerprint = scopeFingerprint(inputs);
   new EventLog(l.events, clock).append("scope-approved", actor, { fingerprint, sha });
   return { fingerprint, sha };

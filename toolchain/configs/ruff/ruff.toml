@@ -1,0 +1,5 @@
+# radr baseline ruff config (lint lane, baseline mode). Client configs are ignored by design so
+# results are comparable across engagements. Its content hash is in toolchain.lock.
+# Security rules (S/bandit) are deliberately NOT here: they belong to the sast lane (M3).
+[lint]
+select = ["E4", "E7", "E9", "F", "B"]

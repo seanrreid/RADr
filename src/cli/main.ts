@@ -4,9 +4,10 @@
 import { systemClock } from "../core/clock.js";
 import { EXIT, RadrError, type ExitCode } from "../core/errors.js";
 import { approve, init, scope, source } from "./commands/engagement.js";
+import { db, doctor, tools } from "./commands/toolchain.js";
 import type { CliContext, CommandSpec } from "./context.js";
 
-export const COMMANDS: readonly CommandSpec[] = [init, scope, approve, source];
+export const COMMANDS: readonly CommandSpec[] = [init, scope, approve, source, tools, doctor, db];
 
 function help(ctx: CliContext): void {
   ctx.out("usage: radr <command> [options]\n");

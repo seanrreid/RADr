@@ -19,7 +19,7 @@ const clockBans = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "test/fixtures/lint/**"] },
+  { ignores: ["dist/**", "node_modules/**", "test/fixtures/lint/**", "toolchain/**"] }, // toolchain/: assets shipped to client lint runs, not radr code
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
