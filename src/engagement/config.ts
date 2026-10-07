@@ -11,11 +11,15 @@ import { RECIPE_SCHEMA, type BuildRecipe } from "../sandbox/recipe.js";
 export const ENGAGEMENT_TYPES = ["triage", "quality", "health-audit", "security", "due-diligence", "pr-review", "debug"] as const;
 export const TIERS = ["triage", "standard", "deep", "diff"] as const;
 /** Lanes implemented in M1. Later milestones extend this list (and policy/matrix.yml). */
-export const LANES = ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage", "sast"] as const;
+export const LANES = ["census", "lint", "secrets", "sca", "history", "tests", "types", "coverage", "sast", "maint", "license", "iac", "hygiene"] as const;
 /** Lanes that run client code in the build sandbox. */
 export const SANDBOX_LANES: readonly string[] = ["types", "coverage"];
+/** Lanes whose tools exist only in the toolchain image (ScanCode, Checkov): container mode only. */
+export const CONTAINER_LANES: readonly string[] = ["license", "iac"];
+/** Opt-in lanes, never proposed by default (PRD §14: Scorecard is optional). */
+export const OPTIONAL_LANES: readonly string[] = ["hygiene"];
 /** The triage tier runs this fixed set (PRD §5): fast, static, no sandbox. */
-export const TRIAGE_LANES: readonly (typeof LANES)[number][] = ["census", "lint", "secrets", "sca", "history", "tests"];
+export const TRIAGE_LANES: readonly (typeof LANES)[number][] = ["census", "lint", "secrets", "sca", "history", "tests", "maint"];
 export const STACKS = ["typescript-javascript", "python"] as const;
 
 export interface EngagementDoc {
@@ -100,6 +104,10 @@ export function parseEngagement(text: string, source: string): EngagementDoc {
   // --network=none. "declared" = host mode. It only makes sense when the scope is offline.
   if (doc.network.enforcement === "container" && doc.network.mode !== "offline") {
     throw new UsageError(`${source}: network enforcement "container" requires network mode "offline"`);
+  }
+  const containerOnly = doc.lanes.filter((x) => CONTAINER_LANES.includes(x));
+  if (containerOnly.length > 0 && doc.network.enforcement !== "container") {
+    throw new UsageError(`${source}: lane${containerOnly.length > 1 ? "s" : ""} ${containerOnly.join(", ")} run only in the toolchain image; set network: { mode: offline, enforcement: container } (after \`radr tools build-image\`)`);
   }
   return doc;
 }

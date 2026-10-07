@@ -8,7 +8,8 @@ import type { DispositionState } from "../findings/disposition.js";
 import type { Finding, Severity } from "../findings/types.js";
 import { sevRank } from "../rubric/rubric.js";
 
-export type ItemKind = "dependency-upgrade" | "secret-rotation" | "lint-cleanup" | "type-errors" | "sast-fix" | "build-reproducibility" | "test-coverage" | "flaky-tests";
+export type ItemKind = "dependency-upgrade" | "secret-rotation" | "lint-cleanup" | "type-errors" | "sast-fix" | "build-reproducibility" | "test-coverage" | "flaky-tests"
+  | "reduce-complexity" | "deduplicate" | "iac-hardening" | "license-review" | "repo-hygiene";
 
 export interface PlanItem {
   readonly key: string;
@@ -36,6 +37,11 @@ function kindOf(f: Finding): ItemKind {
   if (f.tool === "radr-build") return "build-reproducibility";
   if (f.tool === "radr-coverage") return f.rule_id === "unstable-results" ? "flaky-tests" : "test-coverage";
   if (f.lane === "sast") return "sast-fix";
+  if (f.tool === "lizard") return "reduce-complexity";
+  if (f.tool === "jscpd") return "deduplicate";
+  if (f.lane === "iac") return "iac-hardening";
+  if (f.lane === "license") return "license-review";
+  if (f.lane === "hygiene") return "repo-hygiene";
   return "lint-cleanup";
 }
 
@@ -44,7 +50,10 @@ function groupKey(f: Finding, kind: ItemKind): string {
     case "dependency-upgrade": return `${kind}:${f.tags.find((t) => t.startsWith("package:")) ?? f.file}`;
     case "secret-rotation": return `${kind}:${f.id}`; // every credential is rotated individually
     case "type-errors":
-    case "lint-cleanup": return `${kind}:${f.tool}`;
+    case "lint-cleanup":
+    case "reduce-complexity":
+    case "deduplicate": return `${kind}:${f.tool}`;
+    case "license-review": return `${kind}:${f.tags.find((t) => t.startsWith("license-class:")) ?? f.rule_id}`;
     default: return `${kind}:${f.tool}:${f.rule_id}`;
   }
 }
@@ -69,6 +78,15 @@ function titleFor(kind: ItemKind, group: readonly Finding[]): string {
     case "flaky-tests": return "Stabilize the test suite (results differ between identical runs)";
     case "test-coverage": return "Fix the failing test suite";
     case "sast-fix": return `Fix ${String(n)} occurrence${n === 1 ? "" : "s"} of ${f.rule_id}`;
+    case "reduce-complexity": return `Reduce the complexity of ${String(n)} function${n === 1 ? "" : "s"} (cyclomatic complexity above the threshold)`;
+    case "deduplicate": return `Consolidate ${String(n)} duplicated code block${n === 1 ? "" : "s"}`;
+    case "iac-hardening": return `Fix ${f.tool} ${f.rule_id} in ${String(n)} place${n === 1 ? "" : "s"}`;
+    case "license-review": {
+      const cls = f.tags.find((t) => t.startsWith("license-class:"))?.slice("license-class:".length) ?? "unknown";
+      const ids = stableSort([...new Set(group.map((g) => g.rule_id))], (x) => x);
+      return `Review ${String(n)} ${cls} license use${n === 1 ? "" : "s"} (${ids.join(", ")}) against how the code is distributed`;
+    }
+    case "repo-hygiene": return `Improve ${f.rule_id} (${f.message})`;
   }
 }
 

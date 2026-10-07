@@ -86,3 +86,44 @@
 - **W5 — Stacks, sandboxed:** pinned images and recipes for golangci-lint, clippy, PMD,
   PHPStan, RuboCop, and dotnet analyzers, plus coverage where practical.
 - **W6 — E2E, docs, and as-built.**
+
+## As built (running notes; finalized in W6)
+
+### W2 — Health lanes
+
+- **`maint`** (host and container). lizard 1.24.1 gets an explicit, sorted file list,
+  because given a directory it walks in filesystem order and silently drops byte-identical
+  files. In host mode it is installed with `pip --target` from the same hash lock as the image
+  (lizard, pathspec, pygments) and run as `python3 -m lizard`. `doctor` locks it like any tool,
+  so the host's `python3` is now a prerequisite. jscpd 5.4.0 (a Rust rewrite; new CLI) comes
+  from node-tools. Findings are CCN > 15 (low) / > 30 (medium) and clones (info). Metrics
+  fill the scorecard's `complex_functions_pct` and `duplication_pct` rows (AC7). `maint` joins
+  the triage lane set and the rubric's auto-confirm lanes.
+- **`license`** (container only). ScanCode reports source licenses, and the sca lane's SBOM
+  for the same run reports dependency licenses that syft reads from lockfiles. Classes are
+  defined in rubric v1 §4b:
+  - class assignment works by exact SPDX id or `prefix*`
+  - AND takes the worse class, OR the better one
+  - `WITH` a linking exception caps the class at weak-copyleft
+  - unmapped ids are `unknown`, never guessed
+
+  Permissive licenses and the engagement's `client_licenses` are never flagged. §4c raises
+  license findings one step for due-diligence engagements (AC8). The image gains
+  `libmagic-mgc`.
+- **`iac`** (container only). Checkov runs with `--directory=DIR` as one token, from `raw/`:
+  Checkov reads `.checkov.yaml` from the `-d DIR` argument and from its cwd, so this keeps
+  client config files from suppressing checks. hadolint runs on the Dockerfiles it finds,
+  using radr's own config. Offline Checkov has no severities, so every failed check is
+  medium (AC9).
+- **`hygiene`** (optional, host and container). Scorecard `--local` runs only the 8 checks
+  that work offline. Fuzzing, SAST and Vulnerabilities need the network or PR history and
+  would differ between host and container. Scores 0–2 are medium findings and 3–4 are low.
+  The matrix row never makes a run partial, though version drift still aborts (AC10).
+- Every tool runs with radr's own config (`.jscpd.json`, `.checkov.yaml` and `.hadolint.yaml`
+  in the client repo are ignored). Inline suppression comments are still honored, as with
+  lint.
+- `license` and `iac` need `network.enforcement: container`: `parseEngagement` refuses them
+  in host mode, and `radr scope` never proposes them there. `hygiene` is opt-in.
+- Verified with real tools: host-vs-container findings hashes stay identical with `maint`. A
+  container e2e on a health fixture finds every planted signal across all four lanes, and two
+  runs produce identical hashes.

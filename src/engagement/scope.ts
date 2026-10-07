@@ -15,7 +15,7 @@ import type { Clock } from "../core/clock.js";
 import { RefusedError, UsageError } from "../core/errors.js";
 import { EventLog } from "../state/events.js";
 import { engagementHash, readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
-import { LANES, SANDBOX_LANES, loadEngagement, writeEngagement, type EngagementDoc } from "./config.js";
+import { CONTAINER_LANES, LANES, OPTIONAL_LANES, SANDBOX_LANES, loadEngagement, writeEngagement, type EngagementDoc } from "./config.js";
 import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
 import { proposeRecipe } from "../sandbox/recipe.js";
 import { listDeps, verifyDeps } from "../sandbox/deps.js";
@@ -82,7 +82,8 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
         source: { origin: normalizeOrigin(req.source ?? ""), sha },
         paths: { include: ["**"], exclude: [] },
         stacks: detection.stacks,
-        lanes: LANES.filter((x) => canSandbox || !SANDBOX_LANES.includes(x)),
+        // Host mode by default: image-only lanes and opt-in lanes are added by the consultant.
+        lanes: LANES.filter((x) => (canSandbox || !SANDBOX_LANES.includes(x)) && !CONTAINER_LANES.includes(x) && !OPTIONAL_LANES.includes(x)),
         rubric: "v1",
         network: { mode: "offline", enforcement: "declared" },
         llm_policy: "off",

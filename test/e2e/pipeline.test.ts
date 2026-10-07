@@ -107,6 +107,12 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     has((f) => f["tool"] === "eslint" && f["rule_id"] === "no-eval", "eslint no-eval");
     has((f) => f["tool"] === "ruff" && f["rule_id"] === "F401", "ruff F401");
 
+    // M3 maint (real lizard + jscpd): the scorecard's complexity and duplication rows have values.
+    const card = JSON.parse((await radr(home, { TZ: "UTC", LANG: "C" }, "scorecard", "-e", "acme-e2e", "--json")).out) as { rows: { key: string; value: unknown }[] };
+    for (const key of ["complex_functions_pct", "duplication_pct"]) {
+      assert.equal(typeof card.rows.find((r) => r.key === key)?.value, "number", `${key} should be measured`);
+    }
+
     const engagement = path.join(home, "engagements", "acme-e2e");
     const owned = walkFiles(engagement, (p) => p.startsWith(path.join(engagement, "source")));
     assert.ok(owned.length > 10, "expected raw output, logs, findings, artifacts");

@@ -27,11 +27,11 @@ import { readScopeInputs, scopeFingerprint } from "../state/fingerprint.js";
 import { Gates } from "../state/gates.js";
 import { osvRoot, readSnapshotsLock, verifySnapshot } from "../toolchain/db.js";
 import { buildLock, diffLocks, doctor, readLock, type ToolCheck, type ToolchainLock } from "../toolchain/doctor.js";
-import { nodeToolsDir } from "../toolchain/install.js";
+import { nodeToolsDir, pyToolsDir } from "../toolchain/install.js";
 import { detectRuntime, sandboxLockEntry, type Runtime } from "../sandbox/runtime.js";
 import { verifyDeps } from "../sandbox/deps.js";
 import { assertSafeImage, containerExec, hostExec, type ContainerMount } from "../toolchain/container.js";
-import { IMAGE_CONFIGS, IMAGE_NODE, IMAGE_NODE_TOOLS, imageBins, imageId } from "../toolchain/image.js";
+import { IMAGE_CONFIGS, IMAGE_NODE, IMAGE_NODE_TOOLS, IMAGE_PY, imageBins, imageId, pyToolVersions } from "../toolchain/image.js";
 import { SANDBOX_LANES } from "../engagement/config.js";
 
 export interface LaneSummary {
@@ -114,6 +114,7 @@ function hostToolbox(home: string, l: Layout, checks: readonly ToolCheck[], runt
   const { osvDb, depsCache } = snapshotsFor(home, l);
   return {
     bins, versions, nodeTools: nodeToolsDir(home), node: process.execPath, osvDb, ruffConfig: assetPath("toolchain/configs/ruff/ruff.toml"), rulesDir: assetPath("rules"),
+    python: bins["lizard"] ?? "/nonexistent/python3", pythonPath: path.join(pyToolsDir(home), "site"),
     exec: hostExec(), sandbox: runtime === undefined ? null : { runtime, depsCache, nodeTools: nodeToolsDir(home) },
   };
 }
@@ -126,6 +127,7 @@ function containerToolbox(home: string, l: Layout, lock: ToolchainLock, runtime:
   const versions: Record<string, string> = {};
   for (const [tool, t] of Object.entries(lock.tools)) versions[tool] = t.version;
   versions["node-tools"] = lock.node_tools.eslint_version;
+  Object.assign(versions, pyToolVersions());
   const { osvDb, depsCache } = snapshotsFor(home, l);
   const mounts: ContainerMount[] = [
     { path: l.dir, readOnly: false },
@@ -135,6 +137,7 @@ function containerToolbox(home: string, l: Layout, lock: ToolchainLock, runtime:
   ];
   return {
     bins: imageBins(platform), versions, nodeTools: IMAGE_NODE_TOOLS, node: IMAGE_NODE, osvDb, ruffConfig: `${IMAGE_CONFIGS}/ruff.toml`, rulesDir: assetPath("rules"),
+    python: `${IMAGE_PY}/bin/python`, pythonPath: null,
     exec: containerExec(runtime, assertSafeImage(image.tag), mounts),
     sandbox: { runtime, depsCache, nodeTools: nodeToolsDir(home) },
   };

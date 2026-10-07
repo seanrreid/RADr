@@ -98,3 +98,38 @@ table:
     timeout:       { action: partial }
     output-cap:    { action: partial }
     parse-error:   { action: partial }
+  # M3 health lanes. maint reads census's file list, so it runs after census.
+  maint:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  # license reads the sca lane's SBOM for dependency licenses, so it runs after sca.
+  license:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  iac:
+    success:       { action: continue }
+    tool-missing:  { action: abort }
+    version-drift: { action: abort }
+    tool-error:    { action: retry, max_attempts: 2, then: partial }
+    timeout:       { action: partial }
+    output-cap:    { action: partial }
+    parse-error:   { action: partial }
+  # Optional lane (PRD §14): its gaps are reported but never block the run or Gate 2.
+  hygiene:
+    success:       { action: continue }
+    tool-missing:  { action: continue }
+    version-drift: { action: abort }       # integrity still fails closed
+    tool-error:    { action: retry, max_attempts: 2, then: continue }
+    timeout:       { action: continue }
+    output-cap:    { action: continue }
+    parse-error:   { action: continue }

@@ -1,0 +1,594 @@
+[
+    {
+        "check_type": "dockerfile",
+        "results": {
+            "failed_checks": [
+                {
+                    "check_id": "CKV_DOCKER_7",
+                    "bc_check_id": null,
+                    "check_name": "Ensure the base image uses a non latest version tag",
+                    "check_result": {
+                        "result": "FAILED",
+                        "results_configuration": [
+                            {
+                                "instruction": "FROM",
+                                "startline": 0,
+                                "endline": 0,
+                                "content": "FROM ubuntu:latest\n",
+                                "value": "ubuntu:latest"
+                            }
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/Dockerfile",
+                    "file_abs_path": "/REPO/Dockerfile",
+                    "repo_file_path": "/probe/Dockerfile",
+                    "file_line_range": [
+                        1,
+                        1
+                    ],
+                    "resource": "/Dockerfile.FROM",
+                    "evaluations": null,
+                    "check_class": "checkov.dockerfile.checks.ReferenceLatestTag",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": null
+                },
+                {
+                    "check_id": "CKV_DOCKER_8",
+                    "bc_check_id": null,
+                    "check_name": "Ensure the last USER is not root",
+                    "check_result": {
+                        "result": "FAILED",
+                        "results_configuration": [
+                            {
+                                "instruction": "USER",
+                                "startline": 2,
+                                "endline": 2,
+                                "content": "USER root\n",
+                                "value": "root"
+                            }
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/Dockerfile",
+                    "file_abs_path": "/REPO/Dockerfile",
+                    "repo_file_path": "/probe/Dockerfile",
+                    "file_line_range": [
+                        3,
+                        3
+                    ],
+                    "resource": "/Dockerfile.USER",
+                    "evaluations": null,
+                    "check_class": "checkov.dockerfile.checks.RootUser",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": null
+                },
+                {
+                    "check_id": "CKV_DOCKER_2",
+                    "bc_check_id": null,
+                    "check_name": "Ensure that HEALTHCHECK instructions have been added to container images",
+                    "check_result": {
+                        "result": "FAILED",
+                        "results_configuration": null
+                    },
+                    "code_block": null,
+                    "file_path": "/Dockerfile",
+                    "file_abs_path": "/REPO/Dockerfile",
+                    "repo_file_path": "/probe/Dockerfile",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "/Dockerfile.",
+                    "evaluations": null,
+                    "check_class": "checkov.dockerfile.checks.HealthcheckExists",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": null,
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": null
+                }
+            ]
+        },
+        "summary": {
+            "passed": 21,
+            "failed": 3,
+            "skipped": 0,
+            "parsing_errors": 0,
+            "resource_count": 1,
+            "checkov_version": "3.3.26"
+        }
+    },
+    {
+        "check_type": "terraform",
+        "results": {
+            "failed_checks": [
+                {
+                    "check_id": "CKV2_AWS_62",
+                    "bc_check_id": null,
+                    "check_name": "Ensure S3 buckets should have event notifications enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV2_AWS_6",
+                    "bc_check_id": null,
+                    "check_name": "Ensure that S3 bucket has a Public Access block",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "block_public_policy",
+                            "block_public_acls",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_145",
+                    "bc_check_id": null,
+                    "check_name": "Ensure that S3 buckets are encrypted with KMS by default",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "server_side_encryption_configuration/rule/apply_server_side_encryption_by_default/sse_algorithm",
+                            "rule/apply_server_side_encryption_by_default/sse_algorithm",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_144",
+                    "bc_check_id": null,
+                    "check_name": "Ensure that S3 bucket has cross-region replication enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "rule/*/status",
+                            "replication_configuration/rules/*/status",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_21",
+                    "bc_check_id": null,
+                    "check_name": "Ensure all data stored in the S3 bucket have versioning enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "versioning_configuration/status",
+                            "resource_type",
+                            "versioning/enabled"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_20",
+                    "bc_check_id": null,
+                    "check_name": "S3 Bucket has an ACL defined which allows public READ access.",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "acl",
+                            "resource_type",
+                            "access_control_policy",
+                            "access_control_policy/grant/*/grantee/uri",
+                            "access_control_policy/grant"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV_AWS_18",
+                    "bc_check_id": null,
+                    "check_name": "Ensure the S3 bucket has access logging enabled",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "logging",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                },
+                {
+                    "check_id": "CKV2_AWS_61",
+                    "bc_check_id": null,
+                    "check_name": "Ensure that an S3 bucket has a lifecycle configuration",
+                    "check_result": {
+                        "result": "FAILED",
+                        "entity": {
+                            "aws_s3_bucket": {
+                                "b": {
+                                    "__end_line__": 4,
+                                    "__start_line__": 1,
+                                    "acl": [
+                                        "public-read"
+                                    ],
+                                    "bucket": [
+                                        "data"
+                                    ],
+                                    "__address__": "aws_s3_bucket.b"
+                                }
+                            }
+                        },
+                        "evaluated_keys": [
+                            "lifecycle_rule",
+                            "resource_type"
+                        ]
+                    },
+                    "code_block": null,
+                    "file_path": "/infra/main.tf",
+                    "file_abs_path": "/REPO/infra/main.tf",
+                    "repo_file_path": "/probe/infra/main.tf",
+                    "file_line_range": [
+                        1,
+                        4
+                    ],
+                    "resource": "aws_s3_bucket.b",
+                    "evaluations": null,
+                    "check_class": "checkov.common.graph.checks_infra.base_check",
+                    "fixed_definition": null,
+                    "entity_tags": null,
+                    "caller_file_path": null,
+                    "caller_file_line_range": null,
+                    "resource_address": null,
+                    "severity": null,
+                    "bc_category": null,
+                    "benchmarks": {},
+                    "description": null,
+                    "short_description": null,
+                    "vulnerability_details": null,
+                    "connected_node": null,
+                    "guideline": null,
+                    "details": [],
+                    "check_len": null,
+                    "definition_context_file_path": "/REPO/infra/main.tf"
+                }
+            ]
+        },
+        "summary": {
+            "passed": 3,
+            "failed": 8,
+            "skipped": 0,
+            "parsing_errors": 0,
+            "resource_count": 1,
+            "checkov_version": "3.3.26"
+        }
+    }
+]

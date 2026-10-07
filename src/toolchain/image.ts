@@ -11,7 +11,7 @@ import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { assetPath, readAsset } from "../core/assets.js";
 import { canonicalJson, stableSort } from "../core/determinism.js";
-import { RefusedError } from "../core/errors.js";
+import { InternalError, RefusedError } from "../core/errors.js";
 import { run } from "../core/exec.js";
 import { treeHash } from "../sandbox/deps.js";
 import { imageRef, type Runtime } from "../sandbox/runtime.js";
@@ -28,6 +28,22 @@ export const DEBIAN_SNAPSHOT = "20261007T000000Z";
 export const IMAGE_TOOLS = "/opt/radr/tools";
 export const IMAGE_NODE_TOOLS = "/opt/radr/node-tools";
 export const IMAGE_CONFIGS = "/opt/radr/configs";
+/** The image's Python venv (hash-locked py-tools: lizard, checkov, scancode). */
+export const IMAGE_PY = "/opt/radr/py";
+/** Python tools whose versions are recorded per run (requirements.txt name → tool name). */
+export const PY_TOOLS: Readonly<Record<string, string>> = { lizard: "lizard", checkov: "checkov", scancode: "scancode-toolkit-mini" };
+
+/** Pinned versions of the Python tools, read from the hash-locked requirements. */
+export function pyToolVersions(): Record<string, string> {
+  const req = readAsset("toolchain/py-tools/requirements.txt");
+  const out: Record<string, string> = {};
+  for (const [tool, pkg] of Object.entries(PY_TOOLS)) {
+    const m = new RegExp(`^${pkg.replace(/[-.]/g, "[-_.]")}==([^\\s]+)`, "m").exec(req);
+    if (m?.[1] === undefined) throw new InternalError(`toolchain/py-tools/requirements.txt does not pin ${pkg}`);
+    out[tool] = m[1];
+  }
+  return out;
+}
 export const IMAGE_NODE = "/usr/local/bin/node";
 const RUNTIME_ENV = ["PATH", "HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CONTAINER_HOST", "CONTAINER_CONNECTION", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"];
 const BUILD_TIMEOUT_MS = 60 * 60 * 1000;
@@ -42,11 +58,12 @@ COPY node-tools/${ESLINT_BASELINE} ./
 
 FROM ${imageRef("python")}
 ARG TARGETARCH
-# Debian packages from a FIXED snapshot (reproducible apt, signature-checked): git only.
+# Debian packages from a FIXED snapshot (reproducible apt, signature-checked): git (history,
+# gitleaks), libmagic1 + libmagic-mgc (ScanCode file-type detection and its magic database).
 RUN rm -f /etc/apt/sources.list.d/debian.sources \\
  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main\\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} bookworm-security main\\n' > /etc/apt/sources.list.d/snapshot.list \\
  && apt-get -o Acquire::Check-Valid-Until=false update \\
- && apt-get install -y --no-install-recommends git \\
+ && apt-get install -y --no-install-recommends git libmagic1 libmagic-mgc \\
  && rm -rf /var/lib/apt/lists/*
 COPY --from=nodetools /usr/local/bin/node ${IMAGE_NODE}
 COPY --from=nodetools ${IMAGE_NODE_TOOLS} ${IMAGE_NODE_TOOLS}
@@ -137,6 +154,8 @@ export async function buildImage(home: string, rt: Runtime, log: (line: string) 
 export function imageBins(platform: "linux-x64" | "linux-arm64"): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [tool, t] of Object.entries(loadManifest().tools)) out[tool] = `${IMAGE_TOOLS}/${tool}/${t.version}/${t.platforms[platform].bin}`;
+  out["checkov"] = `${IMAGE_PY}/bin/checkov`;
+  out["scancode"] = `${IMAGE_PY}/bin/scancode`;
   return out;
 }
 

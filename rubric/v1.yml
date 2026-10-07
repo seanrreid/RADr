@@ -36,7 +36,13 @@ base:
   radr-build: { build-failed: high }                  # does not build from a clean checkout
   opengrep: { ERROR: high, WARNING: medium, INFO: low } # sast lane (curated rule pack)
   radr-coverage: { tests-failed: medium, flaky-test: medium }
-  # M3 tools (opengrep, bandit, gosec, checkov, …) are added here as their adapters land.
+  lizard: { complex: low, very-complex: medium }       # maint: CCN > 15 / CCN > 30 (see maint lane)
+  jscpd: { clone: info }                                # maint: duplicated block (the % is a scorecard metric)
+  checkov: { failed: medium }                           # iac: offline checks carry no severity of their own
+  hadolint: { error: medium, warning: low, info: info, style: info }
+  scancode: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }  # source licenses, by §4 class
+  syft: { network-copyleft: high, restricted: high, strong-copyleft: medium, weak-copyleft: low, unknown: low }      # dependency licenses (SBOM)
+  scorecard: { failing: medium, weak: low }             # hygiene: Scorecard check score 0–2 / 3–4
 
 # --- 2. Rule overrides: exact (tool, rule_id) → severity, applied after base ---------------------
 # Rule IDs must exist in the pinned tool version; radr checks gitleaks IDs against its rule list.
@@ -71,10 +77,32 @@ path_modifiers:
             "**/payment*/**", "**/billing/**", "**/admin/**"]
     categories: [security]
 
+# --- 4b. Licenses (license lane) ----------------------------------------------------------------
+# An SPDX id maps to a class by exact id or by a prefix ending in "*". An expression's class:
+# A AND B → the worse; A OR B → the better (the licensee chooses); X WITH E → X's class, unless
+# E is a linking exception (then at most weak-copyleft). Unmapped ids are "unknown", never guessed.
+# Permissive findings are not emitted; the engagement's client_licenses are never flagged.
+licenses:
+  order: [permissive, weak-copyleft, unknown, strong-copyleft, restricted, network-copyleft]  # better → worse
+  classes:
+    permissive: [MIT, MIT-0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, BSD-3-Clause-Clear, 0BSD, ISC, Zlib, Unlicense, CC0-1.0,
+                 BSL-1.0, Python-2.0, PSF-2.0, X11, PostgreSQL, WTFPL, CC-BY-3.0, CC-BY-4.0, BlueOak-1.0.0, Unicode-DFS-2016,
+                 Unicode-3.0, NCSA, Artistic-2.0, OFL-1.1, curl, LicenseRef-scancode-public-domain]
+    weak-copyleft: ["LGPL-*", "MPL-*", "EPL-*", "CDDL-*", "EUPL-*", "CPL-1.0", "OSL-*", CC-BY-SA-4.0, CC-BY-SA-3.0]
+    strong-copyleft: ["GPL-*"]
+    network-copyleft: ["AGPL-*", "SSPL-*"]
+    restricted: ["CC-BY-NC-*", "CC-BY-ND-*", BUSL-1.1, Elastic-2.0, "PolyForm-*", LicenseRef-scancode-commons-clause,
+                 LicenseRef-scancode-proprietary-license, LicenseRef-scancode-other-permissive-noncommercial]
+  linking_exceptions: [Classpath-exception-2.0, LLVM-exception, GCC-exception-3.1, GCC-exception-2.0, Autoconf-exception-3.0, Bison-exception-2.2]
+
+# --- 4c. Engagement-type overrides: applied last, ±1 step ---------------------------------------
+engagement_overrides:
+  due-diligence: { categories: [license], step: 1 }   # license risk is a deal term in DD
+
 # --- 5. Disposition routing (PRD §8) -------------------------------------------------------------
 disposition:
   auto_confirm:
-    lanes: [lint, types, sca]
+    lanes: [lint, types, sca, maint]
     max_severity: medium             # auto-confirm only findings at medium or below
     sca_requires_cve: true           # an SCA finding auto-confirms only with a CVE
   review_set:                        # always human-dispositioned, whatever the lane rules say
@@ -115,4 +143,9 @@ effort:
     build-reproducibility: M
     test-coverage: M
     flaky-tests: M
+    reduce-complexity: M
+    deduplicate: S
+    iac-hardening: S
+    license-review: M
+    repo-hygiene: S
   # Consultant overrides per plan item are recorded as events.

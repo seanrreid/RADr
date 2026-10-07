@@ -12,7 +12,7 @@ export class ParseError extends Error {
 /** Reads lines [start..end] (1-based, inclusive) of a repo-relative file, or null if unavailable. */
 export type SnippetReader = (file: string, start: number, end: number) => string | null;
 
-interface AdapterInput {
+export interface AdapterInput {
   readonly raw: string;
   readonly rawRef: string;
   readonly repoRoot: string;
@@ -22,7 +22,7 @@ interface AdapterInput {
 
 const MAX_SNIPPET_LINES = 10;
 
-function parseJson(raw: string, tool: string): unknown {
+export function parseJson(raw: string, tool: string): unknown {
   try {
     return JSON.parse(raw);
   } catch {
@@ -30,22 +30,22 @@ function parseJson(raw: string, tool: string): unknown {
   }
 }
 
-function obj(v: unknown, what: string): Record<string, unknown> {
+export function obj(v: unknown, what: string): Record<string, unknown> {
   if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ParseError(`${what}: expected an object`);
   return v as Record<string, unknown>;
 }
 
-function arr(v: unknown, what: string): unknown[] {
+export function arr(v: unknown, what: string): unknown[] {
   if (!Array.isArray(v)) throw new ParseError(`${what}: expected an array`);
   return v;
 }
 
-function str(v: unknown, what: string): string {
+export function str(v: unknown, what: string): string {
   if (typeof v !== "string") throw new ParseError(`${what}: expected a string`);
   return v;
 }
 
-function int(v: unknown, what: string, fallback?: number): number {
+export function int(v: unknown, what: string, fallback?: number): number {
   if (v === undefined || v === null) {
     if (fallback !== undefined) return fallback;
     throw new ParseError(`${what}: missing`);
@@ -55,7 +55,7 @@ function int(v: unknown, what: string, fallback?: number): number {
 }
 
 /** A tool reporting a path outside the repo is unexpected output, not a crash. */
-function repoPath(p: string, repoRoot: string): string {
+export function repoPath(p: string, repoRoot: string): string {
   try {
     return normalizePath(p, repoRoot);
   } catch (e) {
@@ -71,7 +71,7 @@ function firstSentence(text: string): string {
   return sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence;
 }
 
-function excerpt(read: SnippetReader, file: string, line: number, end: number): string | null {
+export function excerpt(read: SnippetReader, file: string, line: number, end: number): string | null {
   if (line < 1) return null;
   return read(file, line, Math.min(Math.max(end, line), line + MAX_SNIPPET_LINES - 1));
 }

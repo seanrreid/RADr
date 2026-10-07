@@ -115,7 +115,7 @@ export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: 
       id: existing?.id ?? `F-${String(nextId++).padStart(ID_WIDTH, "0")}`,
       fingerprint: p.fingerprint,
       class: "tool",
-      ...rubric.assess(p.draft, vulns),
+      ...rubric.assess(p.draft, vulns, { engagementType: doc.engagement_type }),
       rubric_version: rubric.version,
       snippet_hash: p.snippetHash,
     };

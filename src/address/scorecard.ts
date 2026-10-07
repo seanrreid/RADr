@@ -47,14 +47,15 @@ export function metricValues(inp: ScorecardInputs): Record<string, number | null
   const census = inp.metrics["census"] as CensusMetrics | undefined;
   const tests = inp.metrics["tests"];
   const history = inp.metrics["history"];
+  const maint = inp.metrics["maint"];
   const sourceCode = num(tests?.["source_code"]);
   const lintErrors = live.filter((f) => f.lane === "lint" && LINT_ERROR_SEVERITIES.has(f.tool_severity)).length;
   return {
     lint_errors_per_kloc_x10:
       inp.lanesRun.has("lint") && census !== undefined && sourceCode !== null && sourceCode > 0 ? Math.floor((lintErrors * 10000) / sourceCode) : null,
     type_errors: inp.lanesRun.has("types") ? live.filter((f) => f.lane === "types" && f.tool_severity === "error").length : null,
-    duplication_pct: null, // maint lane (M3)
-    complex_functions_pct: null, // maint lane (M3)
+    duplication_pct: num(maint?.["duplication_pct"]),
+    complex_functions_pct: num(maint?.["complex_functions_pct"]),
     test_ratio_pct: num(tests?.["test_ratio_pct"]),
     bus_factor: num(history?.["bus_factor"]),
     churn_hotspot_pct: num(history?.["churn_hotspot_pct"]),

@@ -1,0 +1,83 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 9,
+        "endLoc": {
+          "column": 1,
+          "line": 9,
+          "position": 268
+        },
+        "name": "src/a.js",
+        "start": 1,
+        "startLoc": {
+          "column": 0,
+          "line": 1,
+          "position": 0
+        }
+      },
+      "format": "javascript",
+      "fragment": "export function calc(x, y, z) {\n  let total = 0;\n  for (let i = 0; i < x; i++) {\n    if (i % 2 === 0) { total += y * i; } else { total -= z; }\n    if (total > 1000) { total = total / 2; }\n    if (total < -1000) { total = total * -1; }\n  }\n  return total + x + y + z;\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 9,
+      "secondFile": {
+        "end": 9,
+        "endLoc": {
+          "column": 1,
+          "line": 9,
+          "position": 268
+        },
+        "name": "src/b.js",
+        "start": 1,
+        "startLoc": {
+          "column": 0,
+          "line": 1,
+          "position": 0
+        }
+      },
+      "tokens": 95
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-10-07T16:14:23.219Z",
+    "formats": {
+      "javascript": {
+        "clones": 1,
+        "duplicatedLines": 9,
+        "duplicatedTokens": 95,
+        "lines": 18,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 50.0,
+        "percentageTokens": 50.0,
+        "sources": 2,
+        "tokens": 190
+      },
+      "python": {
+        "clones": 0,
+        "duplicatedLines": 0,
+        "duplicatedTokens": 0,
+        "lines": 109,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 0.0,
+        "percentageTokens": 0.0,
+        "sources": 2,
+        "tokens": 675
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 9,
+      "duplicatedTokens": 95,
+      "lines": 127,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 7.086614173228346,
+      "percentageTokens": 10.982658959537572,
+      "sources": 4,
+      "tokens": 865
+    }
+  }
+}

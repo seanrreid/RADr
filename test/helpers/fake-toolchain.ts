@@ -9,7 +9,8 @@ import { assetPath } from "../../src/core/assets.js";
 import { canonicalJson, hashBytes } from "../../src/core/determinism.js";
 import { fixedClock } from "../../src/core/clock.js";
 import { syncOsv } from "../../src/toolchain/db.js";
-import { ESLINT_BASELINE, RECEIPT, nodeToolsDir, toolDir, type Receipt } from "../../src/toolchain/install.js";
+import { ESLINT_BASELINE, RECEIPT, nodeToolsDir, pyToolsDir, toolDir, type Receipt } from "../../src/toolchain/install.js";
+import { pyToolVersions } from "../../src/toolchain/image.js";
 import { currentPlatform, loadManifest } from "../../src/toolchain/manifest.js";
 
 /** What each real tool prints for its version command (verified against the pinned releases). */
@@ -22,6 +23,8 @@ const VERSION_OUTPUT: Readonly<Record<string, (v: string) => string>> = {
   pandoc: (v) => `pandoc ${v}\nFeatures: +server +lua`,
   typst: (v) => `typst ${v} (abcdef12)`,
   opengrep: (v) => v,
+  hadolint: (v) => `Haskell Dockerfile Linter ${v}`,
+  scorecard: (v) => `GitVersion:    v${v}\nGitCommit:     n/a`,
 };
 
 /** Default behaviors: valid, empty results in each tool's real output format. */
@@ -32,6 +35,8 @@ export const DEFAULT_BEHAVIOR: Readonly<Record<string, string>> = {
   "osv-scanner": "echo '{\"results\":[]}'",
   syft: "exit 0",
   opengrep: "echo '{\"results\":[],\"errors\":[]}'",
+  hadolint: "echo '[]'",
+  scorecard: "echo '{\"checks\":[]}'",
 };
 
 function script(tool: string, version: string, behavior: string): string {
@@ -72,6 +77,40 @@ export function seedFakeToolchain(home: string): void {
   writeFileSync(path.join(nt, "node_modules", "eslint", "package.json"), '{"version":"10.12.0"}');
   writeFileSync(path.join(nt, "node_modules", "eslint", "bin", "eslint.js"), "process.stdout.write('[]');\n");
   copyFileSync(assetPath(`toolchain/configs/eslint/${ESLINT_BASELINE}`), path.join(nt, ESLINT_BASELINE));
+  // jscpd: writes fake-report.json (if present) or an empty report into --output.
+  mkdirSync(path.join(nt, "node_modules", "jscpd"), { recursive: true });
+  writeFileSync(path.join(nt, "node_modules", "jscpd", "run-jscpd.js"), [
+    "const fs = require('fs'), path = require('path');",
+    "const out = process.argv[process.argv.indexOf('--output') + 1];",
+    "const fake = path.join(__dirname, 'fake-report.json');",
+    "fs.mkdirSync(out, { recursive: true });",
+    "fs.writeFileSync(path.join(out, 'jscpd-report.json'), fs.existsSync(fake) ? fs.readFileSync(fake) : '{\"duplicates\":[],\"statistics\":{\"total\":{\"lines\":0,\"duplicatedLines\":0}}}');",
+    "",
+  ].join("\n"));
+  writeFileSync(path.join(nt, "node_modules", "jscpd", "package.json"), '{"type":"commonjs"}');
+  setFakeLizard(home);
+}
+
+/** Fake host lizard (pip --target layout): `import lizard` works; `-m lizard` runs a shell behavior. */
+export function setFakeLizard(home: string, behavior = "exit 0"): void {
+  const site = path.join(pyToolsDir(home), "site");
+  mkdirSync(site, { recursive: true });
+  writeFileSync(path.join(site, "lizard.py"), [
+    "import os, subprocess, sys",
+    `version = ${JSON.stringify(pyToolVersions()["lizard"])}`,
+    "if __name__ == '__main__':",
+    "    if '--version' in sys.argv:",
+    "        print(version); sys.exit(0)",
+    "    b = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'behavior.sh')).read()",
+    "    sys.exit(subprocess.call(['sh', '-c', b, 'lizard'] + sys.argv[1:]))",
+    "",
+  ].join("\n"));
+  writeFileSync(path.join(site, "behavior.sh"), behavior);
+}
+
+/** Make the fake jscpd report these duplicates/statistics. */
+export function setFakeJscpd(home: string, report: unknown): void {
+  writeFileSync(path.join(nodeToolsDir(home), "node_modules", "jscpd", "fake-report.json"), JSON.stringify(report));
 }
 
 /** An OSV snapshot. Defaults to placeholder bytes; pass real zips for scanning tests. */

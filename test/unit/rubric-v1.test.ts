@@ -154,3 +154,28 @@ describe("auto-confirm in a review + bulk disposition (AC3, AC4)", () => {
     assert.equal(again.code, 1, "confirmed → dismissed is not a legal transition");
   });
 });
+
+describe("rubric v1 §4b license classes and §4c engagement overrides", () => {
+  const rubric = loadRubric("v1");
+  const classify = rubric.classifyLicense ?? ((): never => { throw new Error("v1 has no classifier"); });
+  it("classifies ids, prefixes, AND (worse), OR (better), WITH (linking exceptions)", () => {
+    assert.equal(classify("MIT"), "permissive");
+    assert.equal(classify("GPL-3.0-only"), "strong-copyleft");
+    assert.equal(classify("LGPL-2.1-or-later"), "weak-copyleft"); // not GPL-* (prefix match from the start)
+    assert.equal(classify("AGPL-3.0-or-later"), "network-copyleft");
+    assert.equal(classify("MIT AND GPL-2.0-only"), "strong-copyleft");
+    assert.equal(classify("MIT OR GPL-2.0-only"), "permissive");
+    assert.equal(classify("(MIT OR Apache-2.0) AND BSD-3-Clause"), "permissive");
+    assert.equal(classify("GPL-2.0-only WITH Classpath-exception-2.0"), "weak-copyleft");
+    assert.equal(classify("GPL-2.0-only WITH Some-other-exception"), "strong-copyleft");
+    assert.equal(classify("LicenseRef-scancode-unknown"), "unknown");
+    assert.equal(classify("MIT AND ("), "unknown"); // malformed: never guessed
+  });
+  it("due-diligence engagements raise license findings one step", () => {
+    const d = { lane: "license", tool: "scancode", tool_version: "x", rule_id: "GPL-3.0-only", category: "license" as const, file: "a.c", line: 1, end_line: 1,
+      message: "m", tool_severity: "strong-copyleft", snippet: null, engine_fingerprint: "a.c:GPL-3.0-only", cve: null, aliases: [], cvss: null, raw_ref: "r", tags: [] };
+    assert.equal(rubric.assess(d, NO_VULN_CONTEXT).severity, "medium");
+    assert.equal(rubric.assess(d, NO_VULN_CONTEXT, { engagementType: "due-diligence" }).severity, "high");
+    assert.equal(rubric.assess(d, NO_VULN_CONTEXT, { engagementType: "health-audit" }).severity, "medium");
+  });
+});

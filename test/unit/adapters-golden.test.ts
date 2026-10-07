@@ -10,15 +10,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "../../src/core/determinism.js";
 import { ParseError, eslintAdapter, gitleaksAdapter, opengrepAdapter, osvAdapter, ruffAdapter, sccMetrics, type SnippetReader } from "../../src/normalize/adapters.js";
+import { checkovAdapter, csvFields, hadolintAdapter, jscpdAdapter, lizardAdapter, sbomLicenseAdapter, scancodeAdapter, scorecardAdapter } from "../../src/normalize/health-adapters.js";
+import { loadRubric } from "../../src/rubric/rubric.js";
 import { FILES } from "../helpers/fixture-repo.js";
 
 const golden = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/golden");
-const read = (tool: string) => readFileSync(path.join(golden, tool, "input.json"), "utf8");
+const read = (tool: string, file = "input.json") => readFileSync(path.join(golden, tool, file), "utf8");
 const snippet: SnippetReader = (file, start, end) => {
   const text = FILES[file];
   return text === undefined ? null : text.split("\n").slice(start - 1, end).join("\n");
 };
 const common = { repoRoot: "/REPO", toolVersion: "pinned", snippet };
+
+const classify = loadRubric("v1").classifyLicense;
+if (classify === undefined) throw new Error("rubric v1 has no license classifier");
+const policy = { classify, clientLicenses: [] as string[] };
 
 function check(tool: string, actual: unknown): void {
   const expectedFile = path.join(golden, tool, "expected.jsonl");
@@ -36,6 +42,40 @@ describe("adapter golden outputs (pinned tool versions)", () => {
   it("osv-scanner", () => { check("osv-scanner", osvAdapter({ ...common, raw: read("osv-scanner"), rawRef: "raw/osv.json" })); });
   it("scc", () => { check("scc", sccMetrics(read("scc"))); });
   it("opengrep", () => { check("opengrep", opengrepAdapter({ ...common, raw: read("opengrep"), rawRef: "raw/opengrep.json" })); });
+  // M3 health lanes (captured from the pinned versions in the toolchain image / host install).
+  it("lizard", () => { check("lizard", lizardAdapter({ ...common, raw: read("lizard", "input.csv"), rawRef: "raw/lizard.csv" })); });
+  it("jscpd", () => { check("jscpd", jscpdAdapter({ ...common, raw: read("jscpd"), rawRef: "raw/jscpd.json" })); });
+  it("checkov", () => { check("checkov", checkovAdapter({ ...common, raw: read("checkov"), rawRef: "raw/checkov.json" })); });
+  it("hadolint", () => { check("hadolint", hadolintAdapter({ ...common, raw: read("hadolint"), rawRef: "raw/hadolint.json" })); });
+  it("scancode", () => { check("scancode", scancodeAdapter({ ...common, raw: read("scancode"), rawRef: "raw/scancode.json" }, policy)); });
+  it("sbom licenses", () => { check("sbom", sbomLicenseAdapter({ ...common, raw: read("sbom"), rawRef: "artifacts/sbom.json" }, policy)); });
+  it("scorecard", () => { check("scorecard", scorecardAdapter({ ...common, raw: read("scorecard"), rawRef: "raw/scorecard.json" })); });
+});
+
+describe("health adapters: edge cases", () => {
+  const r = (raw: string) => ({ ...common, raw, rawRef: "raw/x.json" });
+  it("checkov: a summary-only object (nothing scanned) and a single-framework object", () => {
+    assert.deepEqual(checkovAdapter(r('{"passed":0,"failed":0,"skipped":0,"parsing_errors":0,"resource_count":0,"checkov_version":"3.3.26"}')), []);
+    const one = '{"check_type":"dockerfile","results":{"failed_checks":[{"check_id":"CKV_DOCKER_2","check_name":"Ensure HEALTHCHECK","file_path":"/Dockerfile","file_line_range":[1,4],"resource":"/Dockerfile."}]}}';
+    const [f] = checkovAdapter(r(one));
+    assert.equal(f?.file, "Dockerfile");
+    assert.equal(f.raw_ref, "raw/x.json#/results/failed_checks/0");
+  });
+  it("lizard CSV: quoted commas, escaped quotes, and malformed rows", () => {
+    assert.deepEqual(csvFields('1,"a, b","say ""hi""",x'), ["1", "a, b", 'say "hi"', "x"]);
+    assert.throws(() => lizardAdapter(r("1,2,3")), ParseError);
+    assert.throws(() => lizardAdapter(r('x,2,3,4,5,"l","a.py","f","f()",1,2')), /NLOC/);
+  });
+  it("license: the client's own license and permissive licenses are not flagged; unknown ids are", () => {
+    const sc = (expr: string) => `{"files":[{"path":"a.c","type":"file","detected_license_expression_spdx":"${expr}","license_detections":[]}]}`;
+    assert.equal(scancodeAdapter(r(sc("MIT")), policy).findings.length, 0);
+    assert.equal(scancodeAdapter(r(sc("GPL-3.0-only")), { ...policy, clientLicenses: ["GPL-3.0-only"] }).findings.length, 0);
+    assert.equal(scancodeAdapter(r(sc("LicenseRef-scancode-weird")), policy).findings[0]?.tool_severity, "unknown");
+  });
+  it("scorecard: scores outside -1..10 are refused; -1 (not applicable) is not a finding", () => {
+    assert.throws(() => scorecardAdapter(r('{"checks":[{"name":"License","score":11,"reason":"x"}]}')), ParseError);
+    assert.deepEqual(scorecardAdapter(r('{"checks":[{"name":"License","score":-1,"reason":"x"}]}')).findings, []);
+  });
 });
 
 describe("adapters refuse output they don't understand", () => {

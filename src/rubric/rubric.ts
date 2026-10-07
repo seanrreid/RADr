@@ -38,9 +38,19 @@ export interface ScorecardSpec {
   };
 }
 
+/** Engagement facts the rubric may key on (v1 §4c). */
+export interface AssessContext {
+  readonly engagementType?: string;
+}
+
+export const LICENSE_CLASSES = ["permissive", "weak-copyleft", "unknown", "strong-copyleft", "restricted", "network-copyleft"] as const;
+export type LicenseClass = (typeof LICENSE_CLASSES)[number];
+
 export interface Rubric {
   readonly version: string;
-  assess(d: FindingDraft, vulns: VulnContext): Assessment;
+  assess(d: FindingDraft, vulns: VulnContext, ctx?: AssessContext): Assessment;
+  /** v1+: the §4b class of an SPDX license expression. */
+  readonly classifyLicense?: (expression: string) => LicenseClass;
   /** v1+: disposition routing, scorecard, effort, definitions. */
   readonly routing?: Routing;
   readonly scorecard?: ScorecardSpec;
@@ -71,6 +81,12 @@ interface DocV1 extends Omit<DocV0, "version"> {
   readonly disposition: Routing;
   readonly scorecard: ScorecardSpec;
   readonly effort: { readonly sizes: Readonly<Record<string, string>>; readonly by_kind: Readonly<Record<string, string>> };
+  readonly licenses: {
+    readonly order: readonly LicenseClass[];
+    readonly classes: Readonly<Partial<Record<LicenseClass, readonly string[]>>>;
+    readonly linking_exceptions: readonly string[];
+  };
+  readonly engagement_overrides: Readonly<Record<string, { readonly categories: readonly Category[]; readonly step: number }>>;
 }
 
 const validateV0 = makeValidator<DocV0>(
@@ -84,7 +100,8 @@ const modifier = { type: "object", additionalProperties: false, required: ["glob
 const validateV1 = makeValidator<DocV1>(
   {
     type: "object", additionalProperties: false,
-    required: ["version", "severities", "definitions", "base", "rule_overrides", "cvss_bands_x10", "promote", "path_modifiers", "disposition", "scorecard", "effort"],
+    required: ["version", "severities", "definitions", "base", "rule_overrides", "cvss_bands_x10", "promote", "path_modifiers", "disposition", "scorecard", "effort",
+      "licenses", "engagement_overrides"],
     properties: {
       version: { const: 1 },
       severities: { type: "array", items: sevEnum },
@@ -121,6 +138,14 @@ const validateV1 = makeValidator<DocV1>(
       },
       effort: { type: "object", additionalProperties: false, required: ["sizes", "by_kind"],
         properties: { sizes: { type: "object", additionalProperties: { type: "string" } }, by_kind: { type: "object", additionalProperties: { enum: ["S", "M", "L"] } } } },
+      licenses: { type: "object", additionalProperties: false, required: ["order", "classes", "linking_exceptions"],
+        properties: {
+          order: { type: "array", items: { enum: [...LICENSE_CLASSES] }, minItems: LICENSE_CLASSES.length, maxItems: LICENSE_CLASSES.length, uniqueItems: true },
+          classes: { type: "object", additionalProperties: false, properties: Object.fromEntries(LICENSE_CLASSES.map((c) => [c, strList])) },
+          linking_exceptions: strList,
+        } },
+      engagement_overrides: { type: "object", additionalProperties: { type: "object", additionalProperties: false, required: ["categories", "step"],
+        properties: { categories: strList, step: { type: "integer", minimum: -1, maximum: 1 } } } },
     },
   },
   InternalError,
@@ -156,14 +181,64 @@ function rubricV0(doc: DocV0): Rubric {
   return { version: "v0", assess: (d) => ({ severity: baseSeverity(doc, d, "v0"), epss_bp: null, kev: null }) };
 }
 
+/** Tokenize an SPDX expression: ids, AND, OR, WITH, parentheses. Case-insensitive operators. */
+function spdxTokens(expr: string): string[] {
+  return expr.replace(/[()]/g, " $& ").trim().split(/\s+/).filter((t) => t !== "");
+}
+
+export function licenseClassifier(spec: DocV1["licenses"]): (expression: string) => LicenseClass {
+  const rank = (c: LicenseClass): number => spec.order.indexOf(c);
+  const classOf = (id: string): LicenseClass => {
+    for (const c of LICENSE_CLASSES) {
+      for (const pat of spec.classes[c] ?? []) {
+        if (pat.endsWith("*") ? id.startsWith(pat.slice(0, -1)) : id === pat) return c;
+      }
+    }
+    return "unknown";
+  };
+  const worse = (a: LicenseClass, b: LicenseClass): LicenseClass => (rank(a) >= rank(b) ? a : b);
+  const better = (a: LicenseClass, b: LicenseClass): LicenseClass => (rank(a) <= rank(b) ? a : b);
+  return (expression) => {
+    const toks = spdxTokens(expression);
+    let i = 0;
+    // Grammar: or := and (OR and)* ; and := with (AND with)* ; with := atom (WITH id)? ; atom := id | ( or )
+    const atom = (): LicenseClass => {
+      const t = toks[i++];
+      if (t === undefined) return "unknown";
+      if (t === "(") { const c = or(); if (toks[i] === ")") i++; return c; }
+      return classOf(t);
+    };
+    const withExpr = (): LicenseClass => {
+      const c = atom();
+      if (toks[i]?.toUpperCase() !== "WITH") return c;
+      i++;
+      const exception = toks[i++] ?? "";
+      return spec.linking_exceptions.includes(exception) ? better(c, "weak-copyleft") : c;
+    };
+    const and = (): LicenseClass => {
+      let c = withExpr();
+      while (toks[i]?.toUpperCase() === "AND") { i++; c = worse(c, withExpr()); }
+      return c;
+    };
+    const or = (): LicenseClass => {
+      let c = and();
+      while (toks[i]?.toUpperCase() === "OR") { i++; c = better(c, and()); }
+      return c;
+    };
+    const c = or();
+    return i === toks.length ? c : "unknown"; // trailing garbage: never guess
+  };
+}
+
 function rubricV1(doc: DocV1): Rubric {
   return {
+    classifyLicense: licenseClassifier(doc.licenses),
     version: "v1",
     routing: doc.disposition,
     scorecard: doc.scorecard,
     effort: doc.effort,
     definitions: doc.definitions,
-    assess(d, vulns) {
+    assess(d, vulns, ctx = {}) {
       let severity = baseSeverity(doc, d, "v1");
       const override = Object.hasOwn(doc.rule_overrides, d.tool) ? doc.rule_overrides[d.tool] : undefined;
       if (override !== undefined && Object.hasOwn(override, d.rule_id)) severity = override[d.rule_id] ?? severity;
@@ -182,6 +257,9 @@ function rubricV1(doc: DocV1): Rubric {
       const { demote, promote } = doc.path_modifiers;
       if (demote.categories.includes(d.category) && matchesAny(d.file, demote.globs)) severity = step(severity, -1);
       if (promote.categories.includes(d.category) && matchesAny(d.file, promote.globs)) severity = step(severity, 1);
+      const et = ctx.engagementType;
+      const eo = et !== undefined && Object.hasOwn(doc.engagement_overrides, et) ? doc.engagement_overrides[et] : undefined;
+      if (eo?.categories.includes(d.category) === true) severity = step(severity, eo.step);
       return { severity, epss_bp: epss, kev };
     },
   };

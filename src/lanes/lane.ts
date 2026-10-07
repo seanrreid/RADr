@@ -32,6 +32,10 @@ export interface Toolbox {
   readonly node: string;
   /** OSV snapshot directory for OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY, if pinned. */
   readonly osvDb: string | null;
+  /** Python interpreter for the Python tools (lizard; checkov and scancode have their own bins in the image). */
+  readonly python: string;
+  /** PYTHONPATH for host-installed Python tools (pip --target dir); null in the image (a venv). */
+  readonly pythonPath: string | null;
   /** Absolute path of radr's ruff baseline config. */
   readonly ruffConfig: string;
   /** radr's rules/ directory (pack + lgpl sub-pack); mounted read-only at the same path in container mode. */

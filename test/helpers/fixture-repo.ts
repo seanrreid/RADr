@@ -185,3 +185,47 @@ export async function makeSandboxFixtureRepo(dir: string): Promise<FixtureRepo> 
   await g(dir, ["commit", "-q", "-m", "buildable fixture"], "2026-02-01T10:00:00Z");
   return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-02-01T10:00:00Z")] };
 }
+
+/** A deeply branching Python function: cyclomatic complexity 1 + 2 per `if … or …` → well above 30. */
+const TANGLED = ["def tangled(a, b):", "    r = 0", ...Array.from({ length: 20 }, (_, i) => `    if a == ${String(i)} or b == ${String(i)}:\n        r += ${String(i)}`), "    return r", ""].join("\n");
+const CALC = `export function calc(x, y, z) {
+  let total = 0;
+  for (let i = 0; i < x; i++) {
+    if (i % 2 === 0) { total += y * i; } else { total -= z; }
+    if (total > 1000) { total = total / 2; }
+    if (total < -1000) { total = total * -1; }
+  }
+  return total + x + y + z;
+}
+`;
+
+/** Health fixture (M3 W2): IaC, a GPL source file, an AGPL dependency, complex and duplicated code. */
+export const HEALTH_FILES: Readonly<Record<string, string>> = {
+  "Dockerfile": "FROM ubuntu:latest\nRUN apt-get update && apt-get install -y curl\nUSER root\nCMD [\"sh\"]\n",
+  "infra/main.tf": 'resource "aws_s3_bucket" "b" {\n  bucket = "data"\n  acl    = "public-read"\n}\n',
+  "vendor/lib.c": "/* SPDX-License-Identifier: GPL-3.0-only */\nint x;\n",
+  "src/a.js": CALC,
+  "src/b.js": CALC,
+  "src/tangled.py": TANGLED,
+  "package.json": '{\n  "name": "health-app",\n  "version": "1.0.0",\n  "private": true,\n  "license": "UNLICENSED",\n  "dependencies": { "netcopy": "1.0.0" }\n}\n',
+  "package-lock.json": `{
+  "name": "health-app",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": { "name": "health-app", "version": "1.0.0", "license": "UNLICENSED", "dependencies": { "netcopy": "1.0.0" } },
+    "node_modules/netcopy": { "version": "1.0.0", "license": "AGPL-3.0-only" }
+  }
+}
+`,
+};
+
+export async function makeHealthFixtureRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-01-01T00:00:00Z");
+  for (const [rel, content] of Object.entries(HEALTH_FILES)) write(dir, rel, content);
+  await g(dir, ["add", "-A"], "2026-01-01T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "health fixture"], "2026-01-01T10:00:00Z");
+  return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-01-01T10:00:00Z")] };
+}

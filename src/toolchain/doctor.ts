@@ -11,7 +11,8 @@ import { hashBytes, stableSort } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import { run } from "../core/exec.js";
 import { parseYaml } from "../core/yaml.js";
-import { ESLINT_BASELINE, nodeToolsDir, readReceipt, toolDir } from "./install.js";
+import { ESLINT_BASELINE, nodeToolsDir, pyToolsDir, readReceipt, toolDir } from "./install.js";
+import { pyToolVersions } from "./image.js";
 import { currentPlatform, loadManifest, type Manifest } from "./manifest.js";
 
 export type ToolState = "ok" | "missing" | "drift";
@@ -74,10 +75,28 @@ export function checkNodeTools(home: string): ToolCheck {
   return { ...base, version: eslintVersion, state: "ok", binPath: path.join(dir, "node_modules", "eslint", "bin", "eslint.js"), detail: "ok" };
 }
 
+/**
+ * Host lizard (maint lane): installed with pip --target from the hash lock and run by the host's
+ * python3. binPath is that interpreter (resolved now, so a run uses the same one); binSha256 is
+ * lizard's own module, so an edited install is drift.
+ */
+export async function checkPyTools(home: string): Promise<ToolCheck> {
+  const version = pyToolVersions()["lizard"] ?? "";
+  const site = path.join(pyToolsDir(home), "site");
+  const base = { tool: "lizard", version };
+  if (!existsSync(path.join(site, "lizard.py"))) return { ...base, state: "missing", detail: "not installed (run `radr tools install`; needs python3 on PATH)" };
+  const r = await run({ command: "python3", args: ["-c", "import sys, lizard; print(sys.executable); print(lizard.version)"], cwd: site, inheritEnv: ["PATH"], env: { PYTHONPATH: site }, timeoutMs: 30_000 });
+  if (r.outcome !== "ok") return { ...base, state: "missing", detail: `python3 cannot run lizard: ${r.stderr.toString().trim().split("\n").at(-1) ?? r.outcome}` };
+  const [python, reported] = r.stdout.toString().trim().split("\n");
+  const binSha256 = hashBytes(readFileSync(path.join(site, "lizard.py")));
+  if (reported !== version) return { ...base, state: "drift", binPath: python ?? "", binSha256, detail: `reports version ${reported ?? "(none)"}, lock pins ${version}` };
+  return { ...base, state: "ok", binPath: python ?? "", binSha256, detail: "ok" };
+}
+
 export async function doctor(home: string): Promise<ToolCheck[]> {
   const manifest = loadManifest();
   const checks = await Promise.all(stableSort(Object.keys(manifest.tools), (t) => t).map((t) => checkTool(home, t, manifest)));
-  return [...checks, checkNodeTools(home)];
+  return [...checks, await checkPyTools(home), checkNodeTools(home)];
 }
 
 /** Build the lock from a fully healthy toolchain; refuses if anything is missing or drifted. */
@@ -85,7 +104,7 @@ export function buildLock(checks: readonly ToolCheck[], sandbox: ToolchainLock["
   const bad = checks.filter((c) => c.state !== "ok");
   if (bad.length > 0) throw new RefusedError(`toolchain not ready: ${bad.map((c) => `${c.tool} ${c.state} (${c.detail})`).join("; ")}`);
   const tools: Record<string, { version: string; bin_sha256: string }> = {};
-  for (const c of checks) if (c.tool !== "node-tools") tools[c.tool] = { version: c.version, bin_sha256: c.binSha256 ?? "" };
+  for (const c of stableSort(checks, (x) => x.tool)) if (c.tool !== "node-tools") tools[c.tool] = { version: c.version, bin_sha256: c.binSha256 ?? "" };
   const node = checks.find((c) => c.tool === "node-tools");
   return {
     version: 1,

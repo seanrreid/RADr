@@ -11,7 +11,7 @@ import { readFileSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { makeFixtureRepo, makeSandboxFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { makeFixtureRepo, makeHealthFixtureRepo, makeSandboxFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 import { zipStored } from "../helpers/zip.js";
 import { syncOsv } from "../../src/toolchain/db.js";
@@ -134,5 +134,41 @@ describe("M3 container toolchain end-to-end (real runtime)", { skip: ENABLED ? f
     });
     assert.notEqual(r.outcome, "ok");
     assert.doesNotMatch(r.stdout.toString(), /REACHED/);
+  });
+
+  it("health lanes (maint, license, iac, hygiene) find the planted signals in the image, deterministically (AC7–AC10)", async () => {
+    await radr("tools", "build-image");
+    const health = await makeHealthFixtureRepo(path.join(root, "health"));
+    const { writeFileSync } = await import("node:fs");
+    const results: { hash: string; findings: Record<string, unknown>[] }[] = [];
+    for (const slug of ["h1", "h2"]) {
+      await radr("init", "acme", slug);
+      await radr("scope", "-e", `acme-${slug}`, "--source", health.dir);
+      const yml = path.join(home, "engagements", `acme-${slug}`, "engagement.yml");
+      writeFileSync(yml, readFileSync(yml, "utf8")
+        .replace("engagement_type: health-audit", "engagement_type: due-diligence")
+        .replace("  enforcement: declared", "  enforcement: container")
+        .replace(/\n {2}- types\n {2}- coverage/, "")
+        .replace("  - maint\n", "  - maint\n  - license\n  - iac\n  - hygiene\n"));
+      await radr("scope", "-e", `acme-${slug}`);
+      await radr("approve", "scope", "-e", `acme-${slug}`);
+      const out = await radr("review", "-e", `acme-${slug}`);
+      assert.match(out, /run R-0001: complete/, out);
+      results.push({
+        hash: (await radr("findings", "-e", `acme-${slug}`, "--hash")).trim(),
+        findings: (await radr("findings", "-e", `acme-${slug}`, "--json")).trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>),
+      });
+    }
+    assert.equal(results[0]?.hash, results[1]?.hash, "two container runs produce identical findings");
+    const findings = results[0]?.findings ?? [];
+    const has = (what: string, pred: (f: Record<string, unknown>) => boolean) => { assert.ok(findings.some(pred), `expected ${what}`); };
+    has("lizard very-complex tangled()", (f) => f["tool"] === "lizard" && f["file"] === "src/tangled.py" && f["severity"] === "medium");
+    has("jscpd clone a.js/b.js", (f) => f["tool"] === "jscpd" && String(f["message"]).includes("src/"));
+    has("hadolint DL3007", (f) => f["tool"] === "hadolint" && f["rule_id"] === "DL3007");
+    has("checkov on the Dockerfile and Terraform", (f) => f["tool"] === "checkov" && f["file"] === "infra/main.tf");
+    // due-diligence: strong copyleft medium → high; network copyleft high → critical.
+    has("scancode GPL-3.0-only source", (f) => f["tool"] === "scancode" && f["file"] === "vendor/lib.c" && f["severity"] === "high");
+    has("AGPL dependency from the SBOM", (f) => f["tool"] === "syft" && f["rule_id"] === "AGPL-3.0-only" && f["severity"] === "critical");
+    has("scorecard checks", (f) => f["tool"] === "scorecard" && f["rule_id"] === "Security-Policy");
   });
 });

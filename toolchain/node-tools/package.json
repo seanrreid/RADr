@@ -1,12 +1,13 @@
 {
   "name": "radr-node-tools",
   "private": true,
-  "description": "Pinned node toolset for radr: baseline eslint and c8 (coverage). Installed with npm ci --ignore-scripts.",
+  "description": "Pinned node toolset for radr: baseline eslint, c8 (coverage), jscpd (duplication). Installed with npm ci --ignore-scripts.",
   "dependencies": {
     "@eslint/js": "10.0.1",
     "@typescript-eslint/parser": "8.71.1",
     "c8": "12.0.0",
     "eslint": "10.12.0",
+    "jscpd": "5.4.0",
     "typescript": "6.0.3"
   }
 }

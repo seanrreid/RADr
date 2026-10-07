@@ -111,3 +111,46 @@ export async function installNodeTools(home: string): Promise<InstallStatus> {
   renameSync(staging, dir);
   return "installed";
 }
+
+/** Host-mode Python tools: only lizard (pure Python). Heavier Python tools (checkov, scancode)
+ *  run in container mode only. Hashes come from the same lock as the image. Installed with
+ *  `pip --target` (a venv embeds its own path and breaks when moved into place) and run as
+ *  `python3 -m lizard` with PYTHONPATH pointing at the target. */
+export const HOST_PY_TOOLS = ["lizard", "pathspec", "pygments"] as const; // lizard + its two (pure-Python) deps
+
+
+export function pyToolsDir(home: string): string {
+  const lockHash = hashBytes(readAsset("toolchain/py-tools/requirements.txt")).slice(7, 23);
+  return path.join(home, "tools", "py-tools", lockHash);
+}
+
+/** The `name==version --hash=…` block for one package from the hash-locked requirements. */
+export function lockBlock(name: string): string {
+  const lines = readAsset("toolchain/py-tools/requirements.txt").split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`${name}==`));
+  if (start === -1) throw new RefusedError(`${name} is not in toolchain/py-tools/requirements.txt`);
+  const block = [lines[start] ?? ""];
+  for (let i = start + 1; i < lines.length && (lines[i] ?? "").startsWith("    --hash="); i++) block.push(lines[i] ?? "");
+  return `${block.join("\n").replace(/ \\$/, "")}\n`;
+}
+
+export async function installHostPyTools(home: string): Promise<InstallStatus | "skipped"> {
+  const dir = pyToolsDir(home);
+  if (existsSync(path.join(dir, "site", "lizard.py"))) return "already-installed";
+  const staging = `${dir}.staging`;
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  writeFileSync(path.join(staging, "requirements.txt"), HOST_PY_TOOLS.map(lockBlock).join(""));
+  const pip = await run({
+    command: "python3",
+    args: ["-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-compile", "--require-hashes", "--no-deps",
+      "--target", path.join(staging, "site"), "-r", path.join(staging, "requirements.txt")],
+    cwd: staging, inheritEnv: ["PATH", "HOME"], timeoutMs: 10 * 60 * 1000,
+  });
+  if (pip.outcome === "tool-missing") return "skipped";
+  if (pip.outcome !== "ok") throw new RefusedError(`py-tools: pip failed: ${pip.stderr.toString().trim().split("\n").at(-1) ?? ""}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(path.dirname(dir), { recursive: true });
+  renameSync(staging, dir);
+  return "installed";
+}

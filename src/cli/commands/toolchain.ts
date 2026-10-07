@@ -5,7 +5,7 @@ import { RefusedError, UsageError } from "../../core/errors.js";
 import { radrHome, resolveEngagement } from "../../engagement/home.js";
 import { listSnapshots, syncOsv, OSV_ECOSYSTEMS } from "../../toolchain/db.js";
 import { buildLock, diffLocks, doctor as runDoctor, readLock } from "../../toolchain/doctor.js";
-import { httpFetcher, installNodeTools, installTool } from "../../toolchain/install.js";
+import { httpFetcher, installHostPyTools, installNodeTools, installTool } from "../../toolchain/install.js";
 import { loadManifest } from "../../toolchain/manifest.js";
 import { listContext, syncContext } from "../../toolchain/vulnctx.js";
 import { detectRuntime, pullImages } from "../../sandbox/runtime.js";
@@ -37,11 +37,13 @@ export const tools: CommandSpec = {
     const home = radrHome(ctx.env);
     const manifest = loadManifest();
     const names = stableSort(Object.keys(manifest.tools), (n) => n);
-    const selected = values.tool === undefined ? [...names, "node-tools"] : [values.tool];
+    const selected = values.tool === undefined ? [...names, "node-tools", "py-tools"] : [values.tool];
     for (const name of selected) {
-      if (name !== "node-tools" && !names.includes(name)) throw new UsageError(`unknown tool "${name}" (known: ${names.join(", ")}, node-tools)`);
-      const status = name === "node-tools" ? await installNodeTools(home) : await installTool(home, name, manifest, httpFetcher);
-      ctx.out(`${name.padEnd(12)} ${status}`);
+      if (name !== "node-tools" && name !== "py-tools" && !names.includes(name)) throw new UsageError(`unknown tool "${name}" (known: ${names.join(", ")}, node-tools, py-tools)`);
+      const status = name === "node-tools" ? await installNodeTools(home)
+        : name === "py-tools" ? await installHostPyTools(home)
+        : await installTool(home, name, manifest, httpFetcher);
+      ctx.out(`${name.padEnd(12)} ${status === "skipped" ? "skipped (no python3 on PATH: the maint lane needs it in host mode)" : status}`);
     }
     if (values.tool !== undefined) return;
     // Sandbox images are pulled here (network), never during a run (--pull=never).

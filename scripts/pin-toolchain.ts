@@ -72,6 +72,18 @@ const SPECS: Readonly<Record<string, ToolSpec>> = {
     assets: { "darwin-arm64": "opengrep_osx_arm64", "darwin-x64": "opengrep_osx_x86", "linux-arm64": "opengrep_manylinux_aarch64", "linux-x64": "opengrep_manylinux_x86" },
     bin: (asset) => asset, versionArgs: ["--version"], versionPattern: "([0-9]+\\.[0-9]+\\.[0-9]+)",
   },
+  // IaC: Dockerfile linting. GPL-3.0: invoked as a separate process only, never linked.
+  hadolint: {
+    repo: "hadolint/hadolint", tag: "v2.15.1", version: "2.15.1", license: "GPL-3.0", checksums: "checksums.sha256", archive: "binary",
+    assets: { "darwin-arm64": "hadolint-macos-arm64", "darwin-x64": "hadolint-macos-x86_64", "linux-arm64": "hadolint-linux-arm64", "linux-x64": "hadolint-linux-x86_64" },
+    bin: (asset) => asset, versionArgs: ["--version"], versionPattern: "Haskell Dockerfile Linter ([0-9.]+)",
+  },
+  // Repo hygiene: OpenSSF Scorecard, --local mode only (no API, no network).
+  scorecard: {
+    repo: "ossf/scorecard", tag: "v5.5.0", version: "5.5.0", license: "Apache-2.0", checksums: "scorecard_checksums.txt", archive: "tar.gz",
+    assets: { "darwin-arm64": "scorecard_5.5.0_darwin_arm64.tar.gz", "darwin-x64": "scorecard_5.5.0_darwin_amd64.tar.gz", "linux-arm64": "scorecard_5.5.0_linux_arm64.tar.gz", "linux-x64": "scorecard_5.5.0_linux_amd64.tar.gz" },
+    bin: () => "scorecard", versionArgs: ["version"], versionPattern: "GitVersion:\\s+v?([0-9.]+)",
+  },
   // Report rendering (M2): pandoc publishes no checksum file, Typst neither; both use GitHub's
   // per-asset digests. pandoc is GPL-2.0+ and is only ever invoked as a separate process.
   pandoc: {

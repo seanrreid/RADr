@@ -44,7 +44,8 @@ describe("radr review", () => {
     assert.match(r.out, /run R-0001: complete/);
     const types = events().map((e) => e.type).filter((t) => t.startsWith("run-") || t.startsWith("lane-"));
     const perLane = ["lane-started", "lane-completed"];
-    assert.deepEqual(types, ["run-started", ...perLane, ...perLane, ...perLane, ...perLane, ...perLane, ...perLane, ...perLane, "run-completed"]);
+    // Host mode, no sandbox: census, lint, secrets, sca, history, tests, sast, maint.
+    assert.deepEqual(types, ["run-started", ...Array.from({ length: 8 }, () => perLane).flat(), "run-completed"]);
     for (const e of events().filter((x) => x.type === "lane-completed")) {
       const tools = e.data["tools"] as { raw_ref?: string }[];
       for (const t of tools) if (t.raw_ref !== undefined) assert.ok(existsSync(path.join(l.dir, t.raw_ref)), `missing raw ${t.raw_ref}`);

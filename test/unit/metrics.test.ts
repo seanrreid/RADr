@@ -122,7 +122,7 @@ describe("scorecard (AC6)", () => {
 describe("triage tier", () => {
   const yml = (tier: string, lanes: string) => `version: 1\nclient: acme\nslug: t\nengagement_type: triage\ntier: ${tier}\nsource: { origin: /x, sha: ${"a".repeat(40)} }\npaths: { include: ["**"], exclude: [] }\nstacks: []\nlanes: ${lanes}\nrubric: v1\nnetwork: { mode: offline, enforcement: declared }\nllm_policy: off\nclient_licenses: []\n`;
   it("requires its fixed lane set", () => {
-    assert.equal(parseEngagement(yml("triage", "[census, lint, secrets, sca, history, tests]"), "e.yml").tier, "triage");
+    assert.equal(parseEngagement(yml("triage", "[census, lint, secrets, sca, history, tests, maint]"), "e.yml").tier, "triage");
     assert.throws(() => parseEngagement(yml("triage", "[lint]"), "e.yml"), UsageError);
   });
 });
