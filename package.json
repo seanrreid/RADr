@@ -5,10 +5,14 @@
   "description": "RAD Review: deterministic code review engagements (Review, Address, Debug)",
   "license": "UNLICENSED",
   "type": "module",
+  "bin": {
+    "radr": "bin/radr.js"
+  },
   "engines": {
     "node": ">=22"
   },
   "files": [
+    "bin",
     "dist/src",
     "policy",
     "rubric",

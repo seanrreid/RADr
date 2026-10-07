@@ -2,6 +2,7 @@
 // ambient environment wholesale, always bounds time and output, and hashes what it captured.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { hashBytes } from "./determinism.js";
 
 /** Pinned locale/timezone for every tool, so tool output can't vary by host settings. */
@@ -53,6 +54,15 @@ export function run(req: ExecRequest): Promise<ExecResult> {
   const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutput = req.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const okCodes = req.okExitCodes ?? [0];
+
+  // spawn reports a missing cwd as ENOENT, indistinguishable from a missing binary; check first.
+  if (!existsSync(req.cwd)) {
+    const empty = Buffer.alloc(0);
+    return Promise.resolve({
+      outcome: "spawn-error", exitCode: null, signal: null, stdout: empty, stderr: empty,
+      stdoutHash: hashBytes(empty), stderrHash: hashBytes(empty), error: `working directory does not exist: ${req.cwd}`,
+    });
+  }
 
   return new Promise((resolve) => {
     const out: Buffer[] = [];

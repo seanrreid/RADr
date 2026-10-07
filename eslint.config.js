@@ -24,7 +24,8 @@ export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   {
     languageOptions: {
-      parserOptions: { projectService: { allowDefaultProject: ["eslint.config.js"] }, tsconfigRootDir: import.meta.dirname },
+      globals: { process: "readonly", console: "readonly" },
+      parserOptions: { projectService: { allowDefaultProject: ["eslint.config.js", "bin/*.js"] }, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
       "no-restricted-syntax": ["error", ...localeAndHashBans, jsonStringifyBan, ...clockBans],
@@ -51,5 +52,5 @@ export default tseslint.config(
     ignores: ["test/fixtures/lint/**"],
     rules: { "no-restricted-syntax": ["error", ...localeAndHashBans, ...clockBans] },
   },
-  { files: ["eslint.config.js"], ...tseslint.configs.disableTypeChecked },
+  { files: ["eslint.config.js", "bin/*.js"], ...tseslint.configs.disableTypeChecked },
 );
