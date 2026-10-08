@@ -45,7 +45,11 @@ const PAYLOADS = {
   "scope-proposed": obj({ fingerprint: sha, engagement_hash: sha }),
   "scope-approved": obj({ fingerprint: sha, sha: { type: "string", pattern: GIT_SHA } }),
   "toolchain-locked": obj({ lock_hash: sha, mode: { enum: ["host", "container"] } }),
-  "run-started": obj({ run_id: runId, fingerprint: sha, tier: str, lanes: { type: "array", items: laneId } }),
+  "run-started": obj(
+    // scope_ref/scope_hash (M6, optional): raw/<run>/scope.json, what the run was scoped with.
+    { run_id: runId, fingerprint: sha, tier: str, lanes: { type: "array", items: laneId }, scope_ref: str, scope_hash: sha },
+    ["run_id", "fingerprint", "tier", "lanes"],
+  ),
   "lane-started": obj({ run_id: runId, lane: laneId, attempt: { type: "integer", minimum: 1 } }),
   "lane-completed": obj(
     {
@@ -141,6 +145,14 @@ const PAYLOADS = {
       to_plan: { type: "boolean" },
     },
     ["debug_id", "outcome", "summary"],
+  ),
+  // M6: one `radr verify` pass: the run it re-checked (against) and the run that did it.
+  "verify-completed": obj(
+    {
+      against: runId, run_id: runId, commit: { type: "string", pattern: GIT_SHA },
+      fixed: { type: "integer", minimum: 0 }, verified: { type: "integer", minimum: 0 }, regressed: { type: "integer", minimum: 0 },
+      still_present: { type: "integer", minimum: 0 }, manual: { type: "array", items: { type: "string", pattern: FINDING_ID } },
+    },
   ),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: FINDING_ID }, from: str, to: str, reason: { type: "string" } },

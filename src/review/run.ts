@@ -20,6 +20,7 @@ import { autoConfirms, loadRubric, type Rubric } from "../rubric/rubric.js";
 import { dispositions, stateOf } from "../findings/disposition.js";
 import type { Finding } from "../findings/types.js";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
+import { parseYaml } from "../core/yaml.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { loadVulnContext } from "../toolchain/vulnctx.js";
 import { EventLog } from "../state/events.js";
@@ -93,6 +94,28 @@ function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: Tool
     else byTool.set(name, "version-drift");
   }
   return { byTool, lines };
+}
+
+/** raw/<run>/scope.json: the engagement doc and both locks a run was scoped with (M6 verify). */
+export interface ScopeSnapshot {
+  readonly engagement: EngagementDoc;
+  readonly toolchain_lock: unknown;
+  readonly snapshots_lock: unknown;
+}
+
+function writeScopeSnapshot(l: Layout, runId: string, doc: EngagementDoc): { ref: string; hash: string } {
+  const read = (f: string): unknown => (existsSync(f) ? parseYaml(readFileSync(f, "utf8"), f) : null);
+  const snap: ScopeSnapshot = { engagement: doc, toolchain_lock: read(l.toolchainLock), snapshots_lock: read(l.snapshotsLock) };
+  const dir = path.join(l.raw, runId);
+  mkdirSync(dir, { recursive: true });
+  const body = canonicalJson(snap);
+  writeFileSync(path.join(dir, "scope.json"), body);
+  return { ref: `raw/${runId}/scope.json`, hash: hashBytes(body) };
+}
+
+export function readScopeSnapshot(l: Layout, runId: string): ScopeSnapshot | null {
+  const f = path.join(l.raw, runId, "scope.json");
+  return existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as ScopeSnapshot) : null;
 }
 
 export function snapshotsFor(home: string, l: Layout): { osvDb: string | null; depsCache: string | null } {
@@ -187,7 +210,10 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const runNumber = log.read().filter((e) => e.type === "run-started").length + 1;
   const runId = `R-${String(runNumber).padStart(4, "0")}`;
   const lanes = matrix.lanes.filter((id) => (doc.lanes as readonly string[]).includes(id));
-  log.append("run-started", actor, { run_id: runId, fingerprint, tier: doc.tier, lanes });
+  // M6: what this run was scoped with, so `radr verify` can later prove a re-run differs only in
+  // the commit. Written under raw/ (never edited) and hash-linked from run-started.
+  const scopeRef = writeScopeSnapshot(l, runId, doc);
+  log.append("run-started", actor, { run_id: runId, fingerprint, tier: doc.tier, lanes, scope_ref: scopeRef.ref, scope_hash: scopeRef.hash });
 
   const summaries: LaneSummary[] = [];
   const drafts: FindingDraft[] = [];

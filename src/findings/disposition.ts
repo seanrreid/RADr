@@ -44,6 +44,11 @@ export function initialState(id: string): DispositionState {
   return id.startsWith("J-") ? "proposed" : "pending";
 }
 
+/** Is from → to in the state machine at all (manual or not)? `radr verify` writes only these. */
+export function canTransition(from: DispositionState, to: DispositionState): boolean {
+  return TRANSITIONS[from].includes(to);
+}
+
 export function checkTransition(from: DispositionState, to: DispositionState, reason: string | undefined): void {
   if (!MANUAL_TARGETS.includes(to)) throw new RefusedError(`"${to}" can't be set by hand (allowed: ${MANUAL_TARGETS.join(", ")})`);
   if (!TRANSITIONS[from].includes(to)) throw new RefusedError(`illegal transition ${from} → ${to}`);

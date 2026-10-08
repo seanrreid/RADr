@@ -8,9 +8,10 @@ import { address, disposition, findings, renderCmd, review, scorecard, status } 
 import { debug } from "./commands/debug.js";
 import { severity, triageCmd } from "./commands/llm.js";
 import { db, deps, doctor, rules, tools } from "./commands/toolchain.js";
+import { verifyCmd } from "./commands/verify.js";
 import type { CliContext, CommandSpec } from "./context.js";
 
-export const COMMANDS: readonly CommandSpec[] = [init, scope, approve, source, review, triageCmd, findings, disposition, severity, status, scorecard, address, renderCmd, debug, tools, doctor, db, deps, rules];
+export const COMMANDS: readonly CommandSpec[] = [init, scope, approve, source, review, triageCmd, findings, disposition, severity, status, scorecard, address, renderCmd, debug, verifyCmd, tools, doctor, db, deps, rules];
 
 function help(ctx: CliContext): void {
   ctx.out("usage: radr <command> [options]\n");

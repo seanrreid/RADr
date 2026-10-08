@@ -344,3 +344,35 @@ export async function makeRegressionRepo(dir: string): Promise<FixtureRepo> {
   }
   return { dir, commits };
 }
+
+/**
+ * Verify fixture (M6): three Python files whose `import unused…` line is a lint finding each.
+ *   c1 "initial"       a, b, c all have the unused import          → 3 findings
+ *   c2 "fix a and c"   a and c fixed, b kept                        → 1 finding
+ *   c3 "regress c"     c's unused import comes back                 → 2 findings
+ *   c4 "break lint"    like c2, plus app/BREAK (VERIFY_RUFF fails)  → lint partial
+ */
+export async function makeVerifyRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-03-01T00:00:00Z");
+  const file = (name: string, bad: boolean) => { write(dir, `app/${name}.py`, `${bad ? `import unused_${name}\n` : ""}def ${name}():\n    return 1\n`); };
+  const commits: string[] = [];
+  const commit = async (msg: string, day: string) => {
+    await g(dir, ["add", "-A"], `2026-03-${day}T00:00:00Z`);
+    await g(dir, ["commit", "-q", "-m", msg], `2026-03-${day}T10:00:00Z`);
+    commits.push(await g(dir, ["rev-parse", "HEAD"], `2026-03-${day}T10:00:00Z`));
+  };
+  file("a", true); file("b", true); file("c", true);
+  await commit("initial", "01");
+  file("a", false); file("c", false);
+  await commit("fix a and c", "02");
+  file("c", true);
+  await commit("regress c", "03");
+  file("c", false);
+  write(dir, "app/BREAK", "\n");
+  await commit("break lint", "04");
+  return { dir, commits };
+}
+
+/** Fake ruff for makeVerifyRepo: F401 per `import unused…` file; exit 3 when app/BREAK exists. */
+export const VERIFY_RUFF = `P=$(pwd -P); [ -f app/BREAK ] && exit 3; out=""; for f in app/*.py; do if head -n1 "$f" | grep -q '^import unused'; then out="$out\${out:+,}{\\"filename\\":\\"$P/$f\\",\\"code\\":\\"F401\\",\\"message\\":\\"unused import\\",\\"location\\":{\\"row\\":1},\\"end_location\\":{\\"row\\":1}}"; fi; done; printf '[%s]' "$out"`;
