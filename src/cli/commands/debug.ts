@@ -8,9 +8,13 @@ import { RefusedError, UsageError } from "../../core/errors.js";
 import { bisect } from "../../debug/bisect.js";
 import { debugSandbox, runDebugScript, scriptHash } from "../../debug/sandbox.js";
 import { gitOut } from "../../engagement/git.js";
+import { guard } from "../../debug/guard.js";
 import { writeRootCause } from "../../debug/report.js";
 import { assertCanConclude, assertCanDecide, assertOpen, getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
 import { resolveSha } from "../../engagement/source.js";
+import { suggest } from "../../llm/debug-suggest.js";
+import { secretFiles } from "../../llm/redact.js";
+import { Matrix } from "../../matrix/matrix.js";
 import { radrHome, resolveEngagement, type Layout } from "../../engagement/home.js";
 import { readJudgments } from "../../findings/judgments.js";
 import { readStore } from "../../findings/store.js";
@@ -20,7 +24,7 @@ import { Gates } from "../../state/gates.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CliContext, CommandSpec } from "../context.js";
 
-const SUBCOMMANDS = ["open", "list", "show", "repro", "bisect", "propose", "experiment", "decide", "conclude", "report"] as const;
+const SUBCOMMANDS = ["open", "list", "show", "repro", "bisect", "propose", "experiment", "decide", "conclude", "report", "guard", "suggest"] as const;
 
 /** debug/<id>/ and its evidence folders. */
 export function debugDir(l: Layout, id: string): { root: string; repro: string; experiments: string; guard: string; runs: string } {
@@ -150,7 +154,7 @@ async function decide(args: readonly string[], ctx: CliContext): Promise<void> {
 }
 
 async function conclude(args: readonly string[], ctx: CliContext): Promise<void> {
-  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, hypothesis: { type: "string" }, summary: { type: "string" }, commit: { type: "string" } }, 2);
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, hypothesis: { type: "string" }, summary: { type: "string" }, commit: { type: "string" }, "to-plan": { type: "boolean" } }, 2);
   const [id = "", outcome = ""] = positionals;
   if (outcome !== "root-caused" && outcome !== "cannot-reproduce") throw new UsageError(`a debug concludes root-caused or cannot-reproduce, not "${outcome}"`);
   if (values.summary === undefined || values.summary.trim() === "") throw new UsageError("a conclusion needs --summary");
@@ -166,11 +170,46 @@ async function conclude(args: readonly string[], ctx: CliContext): Promise<void>
     debug_id: d.id, outcome, summary: values.summary.trim(),
     ...(outcome === "root-caused" && values.hypothesis !== undefined ? { hypothesis_id: values.hypothesis } : {}),
     ...(introducing !== undefined ? { introducing_commit: introducing } : {}),
+    ...(values["to-plan"] === true && outcome === "root-caused" ? { to_plan: true } : {}),
   });
   const file = path.join(debugDir(l, d.id).root, "root-cause.md");
   writeRootCause(file, getDebug(log.read(), d.id), l.id);
   ctx.out(`${d.id} concluded ${outcome}${introducing !== undefined ? ` (introduced by ${introducing.slice(0, 12)})` : ""}`);
   ctx.out(`  record: ${file}`);
+}
+
+async function guardCmd(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, "fix-commit": { type: "string" }, stack: { type: "string" } }, 1);
+  const home = radrHome(ctx.env);
+  const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const { doc } = await assertScope(l, Gates.load(), log);
+  const d = getDebug(log.read(), positionals[0] ?? "");
+  const fix = values["fix-commit"] === undefined ? undefined : await resolveSha(l.mirror, values["fix-commit"]);
+  const sb = await debugSandbox(home, l, doc, ctx.env, snapshotsFor(home, l).depsCache, values.stack);
+  const g = await guard(l, log, await resolveActor(ctx.env), sb, d, debugDir(l, d.id).guard, fix);
+  ctx.out(`${g.withoutFix.runId}: without the fix → ${g.withoutFix.outcome === "present" ? "test fails (good)" : `test ${g.withoutFix.outcome === "absent" ? "passes" : g.withoutFix.outcome} (it must fail)`}`);
+  ctx.out(`${g.withFix.runId}: with the fix    → ${g.withFix.outcome === "absent" ? "test passes (good)" : `test ${g.withFix.outcome === "present" ? "fails" : g.withFix.outcome} (it must pass)`}`);
+  writeRootCause(path.join(debugDir(l, d.id).root, "root-cause.md"), getDebug(log.read(), d.id), l.id);
+  if (!g.holds) throw new RefusedError(`the regression guard does not hold for ${d.id}: the test must fail without the fix and pass with it`);
+  ctx.out(`guard holds; deliver ${path.join(debugDir(l, d.id).guard, "test.patch")}`);
+}
+
+async function suggestCmd(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION }, 1);
+  const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const { doc } = await assertScope(l, Gates.load(), log);
+  if (doc.llm_policy === "off") throw new RefusedError(`llm_policy is "off" for ${l.id}; suggestions need metadata-only or code-allowed`);
+  const d = getDebug(log.read(), positionals[0] ?? "");
+  const f = d.findingId === undefined ? undefined
+    : d.findingId.startsWith("J-") ? readJudgments(l.judgments).find((j) => j.id === d.findingId) : readStore(l.findings).findings.find((x) => x.id === d.findingId);
+  const actor = await resolveActor(ctx.env);
+  const noCode = secretFiles(readStore(l.findings).findings);
+  const r = await suggest(l, log, actor, { policy: doc.llm_policy, env: ctx.env, llmDir: l.llm, log, actor, matrix: Matrix.load() }, d, f, noCode);
+  ctx.out(`suggest ${d.id}: ${r.status}; proposed ${r.proposed.length > 0 ? r.proposed.join(", ") : "nothing"}${r.rejected > 0 ? `; rejected ${String(r.rejected)}` : ""}`);
+  if (r.proposed.length > 0) ctx.out(`these are [LLM] proposals: test each with radr debug experiment ${d.id} --hypothesis <H-id> <script>`);
+  if (r.status === "aborted") throw new RefusedError("suggest aborted: the agent command is missing (see the llm-call event)");
 }
 
 function report(args: readonly string[], ctx: CliContext): void {
@@ -236,6 +275,8 @@ export const debug: CommandSpec = {
       case "experiment": return experiment(rest, ctx);
       case "decide": return decide(rest, ctx);
       case "conclude": return conclude(rest, ctx);
+      case "guard": return guardCmd(rest, ctx);
+      case "suggest": return suggestCmd(rest, ctx);
       case "report":
         report(rest, ctx);
         return;

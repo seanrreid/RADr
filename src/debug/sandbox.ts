@@ -87,6 +87,8 @@ export interface RunSpec {
   /** The script to run (repro/repro.sh, experiments/<name>.sh, …). */
   readonly script: string;
   readonly hypothesisId?: string;
+  /** Hashes of patches applied to `worktree` on top of `commit` (guard runs). */
+  readonly patchHashes?: readonly string[];
 }
 
 export interface RunResult {
@@ -143,6 +145,7 @@ export async function runDebugScript(l: Layout, log: EventLog, actor: string, sb
     debug_id: spec.debugId, run_id: runId, kind: spec.kind, commit: spec.commit, script_hash: hashNow, exit_code: exitCode, outcome,
     log_ref: logRef, log_hash: hashBytes(existsSync(logFile) ? readFileSync(logFile) : Buffer.alloc(0)),
     ...(spec.hypothesisId !== undefined ? { hypothesis_id: spec.hypothesisId } : {}),
+    ...(spec.patchHashes !== undefined ? { patch_hashes: [...spec.patchHashes] } : {}),
     ...(detail !== undefined ? { detail: detail.slice(0, 500) } : {}),
   });
   return { runId, outcome, exitCode, logRef, scriptHash: hashNow };

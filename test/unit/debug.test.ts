@@ -4,14 +4,18 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { fixedClock } from "../../src/core/clock.js";
 import { hashBytes } from "../../src/core/determinism.js";
 import { bisect, nextProbe } from "../../src/debug/bisect.js";
+import { guard } from "../../src/debug/guard.js";
+import { promptFreeText } from "../../src/llm/prompt.js";
+import { leakedRuns } from "../../src/llm/redact.js";
 import { runDebugScript, type DebugSandbox } from "../../src/debug/sandbox.js";
 import { gitOut } from "../../src/engagement/git.js";
 import { checkoutWorktree } from "../../src/engagement/source.js";
 import { RefusedError } from "../../src/core/errors.js";
-import { assertCanConclude, assertCanDecide, getDebug, nextId, outcomeOf } from "../../src/debug/state.js";
+import { assertCanConclude, assertCanDecide, getDebug, guardHolds, nextId, outcomeOf } from "../../src/debug/state.js";
 import { layout } from "../../src/engagement/home.js";
 import { EventLog } from "../../src/state/events.js";
 import { cliRunner } from "../helpers/cli.js";
@@ -166,15 +170,19 @@ describe("the planted-regression fixture", () => {
 });
 
 /** An approved engagement on the planted-regression repo, with D-0001 open and repro.sh written. */
-async function opened() {
+async function opened(opts: { policy?: string; env?: Record<string, string>; issue?: string } = {}) {
   const repo = await makeRegressionRepo(path.join(tmpDir(), "calc"));
   const home = tmpDir();
   await seedHome(home);
-  const radr = cliRunner(home);
+  const radr = cliRunner(home, opts.env ?? {});
   await radr("init", "acme", "calc");
   assert.equal((await radr("scope", "-e", "acme-calc", "--source", repo.dir)).code, 0);
+  if (opts.policy !== undefined) {
+    const yml = layout(home, "acme-calc").engagementYml;
+    writeFileSync(yml, readFileSync(yml, "utf8").replace("llm_policy: off", `llm_policy: ${opts.policy}`));
+  }
   assert.equal((await radr("approve", "scope", "-e", "acme-calc")).code, 0);
-  assert.equal((await radr("debug", "open", "--issue", "add(2, 2) returns 5", "-e", "acme-calc")).code, 0);
+  assert.equal((await radr("debug", "open", "--issue", opts.issue ?? "add(2, 2) returns 5", "-e", "acme-calc")).code, 0);
   const l = layout(home, "acme-calc");
   const script = path.join(l.debug, "D-0001", "repro", "repro.sh");
   writeFileSync(script, REGRESSION_REPRO);
@@ -184,7 +192,7 @@ async function opened() {
     prelude: "", env: {}, online: false, mounts: [], runner: localSandbox, ...over,
   });
   const spec = (worktree: string, commit: string) => ({ debugId: "D-0001", kind: "repro" as const, commit, worktree, script });
-  return { repo, radr, l, log, sb, spec, script };
+  return { repo, radr, l, log, sb, spec, script, home };
 }
 describe("debug runs in the sandbox (M5 W1)", () => {
 
@@ -346,5 +354,103 @@ describe("hypotheses, conclusion and root-cause.md (M5 W3)", () => {
     const c = await e("conclude", "D-0001", "cannot-reproduce", "--summary", "Tried on the approved commit; add(2, 2) was 4.");
     assert.equal(c.code, 0, c.err);
     assert.match(readFileSync(path.join(t.l.debug, "D-0001", "root-cause.md"), "utf8"), /outcome: "cannot-reproduce"/);
+  });
+});
+
+const TEST_PATCH = `diff --git a/test/add.test.js b/test/add.test.js
+new file mode 100644
+--- /dev/null
++++ b/test/add.test.js
+@@ -0,0 +1,4 @@
++const { test } = require("node:test");
++const assert = require("node:assert");
++const { add } = require("../src/math.js");
++test("add(2, 2) is 4", () => assert.equal(add(2, 2), 4));
+`;
+const FIX_PATCH = `diff --git a/src/math.js b/src/math.js
+--- a/src/math.js
++++ b/src/math.js
+@@ -1,3 +1,3 @@
+-const add = (a, b) => a + b + (a === b ? 1 : 0);
++const add = (a, b) => a + b;
+ const mul = (a, b) => a * b;
+ module.exports = { add, mul };
+`;
+
+describe("regression guard, plan item, and LLM suggestions (M5 W4)", () => {
+  async function guarded(fixPatch = FIX_PATCH) {
+    const t = await opened();
+    await runDebugScript(t.l, t.log, "c", t.sb(), t.spec(t.l.worktree, t.repo.commits.at(-1) ?? ""));
+    const dir = path.join(t.l.debug, "D-0001", "guard");
+    writeFileSync(path.join(dir, "test.patch"), TEST_PATCH);
+    writeFileSync(path.join(dir, "guard.sh"), "#!/bin/sh\nnode --test test/add.test.js\n");
+    writeFileSync(path.join(dir, "fix.patch"), fixPatch);
+    return { ...t, dir, d: () => getDebug(t.log.read(), "D-0001") };
+  }
+
+  it("holds when the test fails without the fix and passes with it; records the patches", async () => {
+    const t = await guarded();
+    const g = await guard(t.l, t.log, "c", t.sb(), t.d(), t.dir, undefined);
+    assert.deepEqual([g.withoutFix.outcome, g.withFix.outcome, g.holds], ["present", "absent", true]);
+    assert.equal(guardHolds(t.d()), true);
+    const runs = t.log.read().filter((e) => e.type === "debug-run" && String(e.data["kind"]).startsWith("guard"));
+    assert.deepEqual(runs.map((e) => (e.data["patch_hashes"] as string[]).length), [1, 2]);
+    assert.equal(readdirSync(path.join(t.l.cache, "debug-worktrees")).length, 0);
+    // A fix already in the client's history works the same way.
+    const viaCommit = await guard(t.l, t.log, "c", t.sb(), t.d(), t.dir, t.repo.commits[REGRESSION_BAD_INDEX - 1]);
+    assert.equal(viaCommit.holds, true);
+  });
+
+  it("does not hold when the 'fix' doesn't fix; refuses a patch that doesn't apply", async () => {
+    const t = await guarded();
+    const g = await guard(t.l, t.log, "c", t.sb(), t.d(), t.dir, t.repo.commits.at(-1));
+    assert.deepEqual([g.withFix.outcome, g.holds], ["present", false]);
+    assert.equal(guardHolds(t.d()), false);
+    const broken = await guarded(FIX_PATCH.replace("a + b + (a === b ? 1 : 0)", "something else entirely"));
+    await assert.rejects(guard(broken.l, broken.log, "c", broken.sb(), broken.d(), broken.dir, undefined), /fix\.patch does not apply/);
+  });
+
+  it("a root-caused debug concluded --to-plan becomes a re-runnable remediation item", async () => {
+    const t = await guarded();
+    const e = (...a: string[]) => t.radr(...a, "-e", "acme-calc");
+    assert.equal((await e("review")).code, 0);
+    await e("debug", "propose", "D-0001", "add() special-cases equal operands");
+    const eq = path.join(t.l.debug, "D-0001", "experiments", "eq.sh");
+    writeFileSync(eq, `#!/bin/sh\nnode -e "process.exit(require('./src/math.js').add(3, 3) === 6 ? 0 : 1)"\n`);
+    const x = await runDebugScript(t.l, t.log, "c", t.sb(), { debugId: "D-0001", kind: "experiment", commit: t.repo.commits.at(-1) ?? "", worktree: t.l.worktree, script: eq, hypothesisId: "H-0001" });
+    await e("debug", "decide", "D-0001", "H-0001", "confirmed", "--run", x.runId, "--reason", "r");
+    assert.equal((await e("debug", "conclude", "D-0001", "root-caused", "--hypothesis", "H-0001", "--summary", "add() adds one for equal operands.", "--to-plan")).code, 0);
+    await guard(t.l, t.log, "c", t.sb(), getDebug(t.log.read(), "D-0001"), t.dir, undefined);
+    assert.equal((await e("address")).code, 0);
+    const plan = readFileSync(path.join(t.l.dir, "plan", "remediation.md"), "utf8");
+    assert.match(plan, /## Debug fixes\n\n### D-0001 add\(\) adds one for equal operands\./);
+    assert.match(plan, /\| unknown \| holds \|/, "no bisect ran, so the introducing commit is unknown");
+    assert.match(plan, /\*\*Done when:\*\* the regression guard/);
+    await e("debug", "report", "D-0001");
+    assert.match(readFileSync(path.join(t.l.debug, "D-0001", "root-cause.md"), "utf8"), /# Regression guard\n\n\| Run \| Kind[^\n]*\n[^\n]*\n\| DR-0003 \| guard-without-fix .* present \|\n\| DR-0004 \| guard-with-fix .* absent \|/);
+  });
+
+  it("suggest: LLM hypotheses are labelled proposals; policy off never spawns; metadata-only withholds code", async () => {
+    const script = tmpDir("radr-agent-script-");
+    const agentDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../helpers/fake-agent.js");
+    const reply = JSON.stringify({ hypotheses: [{ text: "add() has a fast path for equal operands", experiment: "compare add(3,3) with 6" }, { text: "", experiment: "x" }] });
+    for (let i = 1; i <= 3; i++) writeFileSync(path.join(script, `response-${String(i)}`), reply);
+    const env = { RADR_AGENT_CMD: JSON.stringify([process.execPath, agentDir, script]) };
+
+    const off = await opened({ env });
+    assert.equal((await off.radr("debug", "suggest", "D-0001", "-e", "acme-calc")).code, 1);
+    assert.equal(existsSync(path.join(script, "count")), false, "policy off: the agent never ran");
+
+    const t = await opened({ env, policy: "metadata-only", issue: "add returns a + b + (a === b ? 1 : 0) for equal inputs" });
+    await runDebugScript(t.l, t.log, "c", t.sb(), t.spec(t.l.worktree, t.repo.commits.at(-1) ?? ""));
+    const s = await t.radr("debug", "suggest", "D-0001", "-e", "acme-calc");
+    assert.equal(s.code, 0, s.err);
+    assert.match(s.out, /proposed H-0001; rejected 1/);
+    const prompt = readFileSync(path.join(t.l.llm, "L-0001.prompt.txt"), "utf8");
+    assert.match(prompt, /withheld: quotes repository code/);
+    assert.doesNotMatch(prompt, /first_bad_diff|repro_log_tail/);
+    assert.deepEqual(leakedRuns(promptFreeText(prompt), t.l.worktree), []);
+    assert.match((await t.radr("debug", "show", "D-0001", "-e", "acme-calc")).out, /H-0001 {2}proposed {2}\[LLM\] add\(\) has a fast path/);
+    assert.equal((await t.radr("debug", "decide", "D-0001", "H-0001", "confirmed", "--run", "DR-0001", "--reason", "the model said so", "-e", "acme-calc")).code, 1, "only an experiment decides");
   });
 });

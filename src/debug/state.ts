@@ -27,6 +27,7 @@ export interface DebugRun {
   readonly logRef: string;
   readonly logHash: string;
   readonly hypothesisId?: string;
+  readonly patchHashes: readonly string[];
 }
 
 export interface Hypothesis {
@@ -52,7 +53,7 @@ export interface DebugState {
   readonly runs: readonly DebugRun[];
   readonly hypotheses: readonly Hypothesis[];
   readonly bisect?: { readonly good: string; readonly bad: string; readonly firstBad: readonly string[] };
-  readonly conclusion?: { readonly outcome: "root-caused" | "cannot-reproduce"; readonly hypothesisId?: string; readonly introducingCommit?: string; readonly summary: string };
+  readonly conclusion?: { readonly outcome: "root-caused" | "cannot-reproduce"; readonly hypothesisId?: string; readonly introducingCommit?: string; readonly summary: string; readonly toPlan: boolean };
 }
 
 /** The repro contract (git bisect run). */
@@ -92,7 +93,7 @@ export function debugStates(events: readonly Event[]): Map<string, DebugState> {
         update(id, (s) => ({
           ...s, runs: [...s.runs, {
             runId: String(d["run_id"]), kind: d["kind"] as RunKind, commit: String(d["commit"]), scriptHash: String(d["script_hash"]),
-            exitCode: typeof d["exit_code"] === "number" ? d["exit_code"] : null, outcome: d["outcome"] as RunOutcome, logRef: String(d["log_ref"]), logHash: String(d["log_hash"]),
+            exitCode: typeof d["exit_code"] === "number" ? d["exit_code"] : null, outcome: d["outcome"] as RunOutcome, logRef: String(d["log_ref"]), logHash: String(d["log_hash"]), patchHashes: Array.isArray(d["patch_hashes"]) ? d["patch_hashes"].map(String) : [],
             ...some("hypothesisId", d["hypothesis_id"]),
           }],
         }));
@@ -111,7 +112,7 @@ export function debugStates(events: readonly Event[]): Map<string, DebugState> {
       case "debug-concluded":
         update(id, (s) => ({
           ...s, conclusion: {
-            outcome: d["outcome"] as "root-caused" | "cannot-reproduce", summary: String(d["summary"]),
+            outcome: d["outcome"] as "root-caused" | "cannot-reproduce", summary: String(d["summary"]), toPlan: d["to_plan"] === true,
             ...some("hypothesisId", d["hypothesis_id"]),
             ...some("introducingCommit", d["introducing_commit"]),
           },
@@ -168,6 +169,17 @@ export function assertCanConclude(d: DebugState, outcome: "root-caused" | "canno
   if (hypothesisId === undefined) throw new RefusedError(`${d.id}: a root cause names the confirmed hypothesis (--hypothesis H-…)`);
   const h = d.hypotheses.find((x) => x.id === hypothesisId);
   if (h?.state !== "confirmed") throw new RefusedError(`${hypothesisId} is not a confirmed hypothesis of ${d.id}`);
+}
+
+/**
+ * The regression guard (PRD §11 step 6) holds when the latest guard run without the fix showed
+ * the bug and the latest run with the fix didn't, both with the same guard script and test patch.
+ */
+export function guardHolds(d: DebugState): boolean {
+  const last = (k: RunKind) => d.runs.filter((r) => r.kind === k).at(-1);
+  const without = last("guard-without-fix");
+  const withFix = last("guard-with-fix");
+  return without?.outcome === "present" && withFix?.outcome === "absent" && without.scriptHash === withFix.scriptHash && without.patchHashes[0] === withFix.patchHashes[0];
 }
 
 /** Next id of a kind across the engagement: D-, DR-, H-. */

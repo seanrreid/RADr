@@ -112,6 +112,8 @@ const PAYLOADS = {
       commit: { type: "string", pattern: GIT_SHA }, script_hash: sha, exit_code: { type: ["integer", "null"] },
       outcome: { enum: ["present", "absent", "skip", "error"] }, log_ref: str, log_hash: sha,
       hypothesis_id: HYPOTHESIS_ID, detail: { type: "string" },
+      // Guard runs: hashes of the patches applied on top of `commit` (test patch, fix patch).
+      patch_hashes: { type: "array", items: sha },
     },
     ["debug_id", "run_id", "kind", "commit", "script_hash", "exit_code", "outcome", "log_ref", "log_hash"],
   ),
@@ -135,6 +137,8 @@ const PAYLOADS = {
     {
       debug_id: DEBUG_ID, outcome: { enum: ["root-caused", "cannot-reproduce"] }, hypothesis_id: HYPOTHESIS_ID,
       introducing_commit: { type: "string", pattern: GIT_SHA }, summary: str,
+      // Add a "Debug fixes" item to the remediation plan (PRD §11 step 7).
+      to_plan: { type: "boolean" },
     },
     ["debug_id", "outcome", "summary"],
   ),

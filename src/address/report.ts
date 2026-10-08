@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import type { Layout } from "../engagement/home.js";
+import { debugStates, guardHolds } from "../debug/state.js";
 import { findingsSetHash } from "../findings/store.js";
 import type { Finding, Severity } from "../findings/types.js";
 import { SEVERITIES } from "../findings/types.js";
@@ -282,7 +283,20 @@ export function renderRemediation(inp: RunInputs, l: Layout, waves: readonly Pla
         `**Done when:** ${esc(it.acceptance)}.`, ...(i < w.items.length - 1 ? [""] : []));
     });
   }
+  const fixes = debugFixes(inp);
+  if (fixes !== null) parts.push("", "## Debug fixes", "", fixes);
   return `${parts.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+/** Root-caused debugs concluded with --to-plan (M5): re-runnable via their regression guard. */
+function debugFixes(inp: RunInputs): string | null {
+  const ds = [...debugStates(inp.events).values()].filter((d) => d.conclusion?.outcome === "root-caused" && d.conclusion.toPlan);
+  if (ds.length === 0) return null;
+  return ds.map((d) => [
+    `### ${d.id} ${esc(d.conclusion?.summary ?? "")}`, "",
+    table(["Introduced by", "Regression guard"], [[d.conclusion?.introducingCommit === undefined ? "unknown" : code(d.conclusion.introducingCommit.slice(0, 12)), guardHolds(d) ? "holds" : "not yet recorded"]]), "",
+    `**Done when:** the regression guard (${code(`debug/${d.id}/guard/guard.sh`)} with ${code("test.patch")}) passes at the fixed commit (\`radr debug guard ${d.id} --fix-commit <sha>\`).`,
+  ].join("\n")).join("\n\n");
 }
 
 export interface AddressResult {
