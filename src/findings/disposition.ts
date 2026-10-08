@@ -49,8 +49,15 @@ export function canTransition(from: DispositionState, to: DispositionState): boo
   return TRANSITIONS[from].includes(to);
 }
 
-export function checkTransition(from: DispositionState, to: DispositionState, reason: string | undefined): void {
-  if (!MANUAL_TARGETS.includes(to)) throw new RefusedError(`"${to}" can't be set by hand (allowed: ${MANUAL_TARGETS.join(", ")})`);
+/**
+ * `id` matters for one case: a judgment finding (J-…) can be marked `fixed` by hand, with a
+ * reason, because no tool can re-check it (M6). Tool findings reach fixed/verified only via
+ * `radr verify`.
+ */
+export function checkTransition(from: DispositionState, to: DispositionState, reason: string | undefined, id = ""): void {
+  const judgmentFix = to === "fixed" && id.startsWith("J-");
+  if (!MANUAL_TARGETS.includes(to) && !judgmentFix) throw new RefusedError(`"${to}" can't be set by hand (allowed: ${MANUAL_TARGETS.join(", ")}${id.startsWith("J-") ? ", fixed" : ""})`);
+  if (judgmentFix && (reason === undefined || reason.trim() === "")) throw new RefusedError("marking a judgment finding fixed requires --reason (what was checked, and where)");
   if (!TRANSITIONS[from].includes(to)) throw new RefusedError(`illegal transition ${from} → ${to}`);
   if (REASON_REQUIRED.includes(to) && (reason === undefined || reason.trim() === "")) throw new RefusedError(`${to} requires --reason`);
 }

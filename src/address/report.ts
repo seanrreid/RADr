@@ -7,7 +7,7 @@ import path from "node:path";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import type { Layout } from "../engagement/home.js";
 import { debugStates, guardHolds } from "../debug/state.js";
-import { findingsSetHash } from "../findings/store.js";
+import { findingsSetHash, readStore } from "../findings/store.js";
 import type { Finding, Severity } from "../findings/types.js";
 import { SEVERITIES } from "../findings/types.js";
 import { sevRank } from "../rubric/rubric.js";
@@ -250,6 +250,8 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     parts.push("", "# Recommendations", "", keep("recommendations", KEEP_DEFAULTS.recommendations));
   }
   if (triage && judged !== null) parts.push("", "# Judgment findings", "", judged);
+  const verified = verificationSection(inp, l);
+  if (verified !== null) parts.push("", "# Verification", "", verified);
   parts.push("", "# Methodology", "", methodology(inp, l));
   if (!triage) parts.push("", "# Appendix: all findings", "", appendix(inp));
   return `${parts.join("\n")}\n`;
@@ -271,6 +273,11 @@ export function renderRemediation(inp: RunInputs, l: Layout, waves: readonly Pla
     "",
     keep("plan-notes", KEEP_DEFAULTS["plan-notes"]),
   ];
+  const v = verifyEvent(inp);
+  if (v !== undefined) {
+    const moved = inp.events.filter((e) => e.type === "finding-disposition" && e.actor === `verify@${inp.runId}`).map((e) => String(e.data["to"]));
+    parts.splice(parts.indexOf("# Remediation plan") + 2, 0, `Verified against ${v.against} at ${code(v.commit.slice(0, 12))}: ${String(moved.filter((x) => x === "verified").length)} verified, ${String(moved.filter((x) => x === "regressed").length)} regressed. This plan lists only what is still open.`, "");
+  }
   for (const w of waves) {
     parts.push("", `## Wave ${String(w.wave)}: ${esc(w.label)}`, "");
     if (w.items.length === 0) {
@@ -286,6 +293,32 @@ export function renderRemediation(inp: RunInputs, l: Layout, waves: readonly Pla
   const fixes = debugFixes(inp);
   if (fixes !== null) parts.push("", "## Debug fixes", "", fixes);
   return `${parts.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+/** The verify pass that produced this run (M6), if any. */
+function verifyEvent(inp: RunInputs): { against: string; commit: string; stillPresent: number } | undefined {
+  const e = inp.events.findLast((x) => x.type === "verify-completed" && x.data["run_id"] === inp.runId);
+  return e === undefined ? undefined : { against: String(e.data["against"]), commit: String(e.data["commit"]), stillPresent: Number(e.data["still_present"]) };
+}
+
+function verificationSection(inp: RunInputs, l: Layout): string | null {
+  const v = verifyEvent(inp);
+  if (v === undefined) return null;
+  const actor = `verify@${inp.runId}`;
+  const moved = new Map<string, string>();
+  for (const e of inp.events) if (e.type === "finding-disposition" && e.actor === actor) moved.set(String(e.data["finding_id"]), String(e.data["to"]));
+  const all = new Map(readStore(l.findings).findings.map((f) => [f.id, f]));
+  const rows = stableSort([...moved], ([id]) => id).map(([id, to]) => {
+    const f = all.get(id);
+    return [id, f?.severity ?? "", to, f === undefined ? "" : code(`${f.tool}/${f.rule_id}`), f === undefined ? "" : code(loc(f))];
+  });
+  const count = (s: string) => [...moved.values()].filter((x) => x === s).length;
+  return [
+    `This run re-checked the findings of ${v.against} at commit ${code(v.commit)}. A finding is **fixed** when it is absent, **verified** when it is absent and its lane ran clean, and **regressed** when a fixed finding came back.`,
+    "",
+    table(["Result", "Findings"], [["verified", String(count("verified"))], ["fixed (not verified)", String(count("fixed"))], ["regressed", String(count("regressed"))], ["still present", String(v.stillPresent)]]),
+    ...(rows.length === 0 ? [] : ["", table(["ID", "Severity", "Now", "Rule", "Location"], rows)]),
+  ].join("\n");
 }
 
 /** Root-caused debugs concluded with --to-plan (M5): re-runnable via their regression guard. */

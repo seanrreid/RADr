@@ -6,6 +6,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fixedClock } from "../../src/core/clock.js";
 import { layout } from "../../src/engagement/home.js";
+import { checkTransition } from "../../src/findings/disposition.js";
 import { EventLog } from "../../src/state/events.js";
 import { scopeDifference } from "../../src/verify/verify.js";
 import type { ScopeSnapshot } from "../../src/review/run.js";
@@ -69,6 +70,31 @@ describe("radr verify", () => {
     assert.deepEqual(done, [["R-0001", "R-0002", 2, 2, 0], ["R-0002", "R-0003", 0, 0, 1]]);
     // The consultant re-confirms a regression for the next cycle.
     assert.equal((await t.e("disposition", id("app/c.py"), "confirmed")).code, 0);
+  });
+
+  it("the report gains a Verification section and the plan says what closed (AC5)", async () => {
+    const t = await engagement();
+    await t.at(0);
+    await t.e("review");
+    const initial = await t.lint();
+    for (const f of initial) await t.e("disposition", f.id, "confirmed");
+    await t.at(1);
+    await t.e("verify", "--against", "R-0001");
+    assert.equal((await t.e("address")).code, 0);
+    const report = readFileSync(path.join(t.l.dir, "report", "report.md"), "utf8");
+    assert.match(report, /# Verification\n\nThis run re-checked the findings of R-0001 at commit `[0-9a-f]{40}`/);
+    assert.match(report, /\| verified \| 2 \|\n\| fixed \(not verified\) \| 0 \|\n\| regressed \| 0 \|\n\| still present \| 1 \|/);
+    const a = initial.find((f) => f.file === "app/a.py")?.id ?? "";
+    assert.match(report, new RegExp(`\\| ${a} \\| [a-z]+ \\| verified \\| \`ruff/F401\` \\| \`app/a\\.py:1\` \\|`));
+    const plan = readFileSync(path.join(t.l.dir, "plan", "remediation.md"), "utf8");
+    assert.match(plan, /# Remediation plan\n\nVerified against R-0001 at `[0-9a-f]{12}`: 2 verified, 0 regressed\. This plan lists only what is still open\./);
+  });
+
+  it("judgment findings close by hand (fixed, with a reason); tool findings only via verify (AC4)", () => {
+    assert.doesNotThrow(() => { checkTransition("confirmed", "fixed", "checked the handler at 3f2a", "J-0001"); });
+    assert.throws(() => { checkTransition("confirmed", "fixed", undefined, "J-0001"); }, /requires --reason/);
+    assert.throws(() => { checkTransition("confirmed", "fixed", "r", "F-0001"); }, /can't be set by hand/);
+    assert.throws(() => { checkTransition("pending", "fixed", "r", "J-0001"); }, /illegal transition/);
   });
 
   it("a lane that didn't run clean can't vouch: absent findings stay fixed, not verified (AC3)", async () => {

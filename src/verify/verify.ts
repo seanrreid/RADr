@@ -21,6 +21,7 @@ import { canonicalJson } from "../core/determinism.js";
 import { RefusedError } from "../core/errors.js";
 import type { Layout } from "../engagement/home.js";
 import { canTransition, dispositions, stateOf, type DispositionState } from "../findings/disposition.js";
+import { readJudgments } from "../findings/judgments.js";
 import { readStore } from "../findings/store.js";
 import type { Finding } from "../findings/types.js";
 import { readScopeInputs } from "../state/fingerprint.js";
@@ -36,8 +37,10 @@ export interface VerifyResult {
   readonly verified: readonly string[];
   readonly regressed: readonly string[];
   readonly stillPresent: readonly string[];
-  /** Absent findings that may have moved (no snippet), and judgment findings: a person checks. */
+  /** Absent findings that may have moved (no snippet): a person checks. */
   readonly manual: readonly string[];
+  /** Confirmed judgment findings: no tool can re-check them (`radr disposition J-… fixed --reason`). */
+  readonly judgments: readonly string[];
 }
 
 /** Why the current scope can't verify `against`'s run, or null when only commit/deps differ. */
@@ -130,9 +133,10 @@ export async function verify(home: string, l: Layout, against: string, actor: st
       out.verified.push(id);
     }
   }
+  const judgments = readJudgments(l.judgments).filter((j) => stateOf(states, j.id) === "confirmed").map((j) => j.id).sort();
   log.append("verify-completed", actor, {
     against, run_id: run.runId, commit: sha, fixed: out.fixed.length, verified: out.verified.length, regressed: out.regressed.length,
-    still_present: out.stillPresent.length, manual: out.manual,
+    still_present: out.stillPresent.length, manual: [...out.manual, ...judgments],
   });
-  return { against, run, ...out };
+  return { against, run, ...out, judgments };
 }

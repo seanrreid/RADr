@@ -25,6 +25,8 @@ export const verifyCmd: CommandSpec = {
     ctx.out(`  regressed ${String(r.regressed.length)}${list(r.regressed)}`);
     ctx.out(`  still present ${String(r.stillPresent.length)}${list(r.stillPresent)}`);
     if (r.manual.length > 0) ctx.out(`  needs a manual check ${String(r.manual.length)}${list(r.manual)} (no code snippet: it may have moved)`);
+    if (r.judgments.length > 0) ctx.out(`  judgment findings to check by hand ${String(r.judgments.length)}${list(r.judgments)} (radr disposition <J-id> fixed --reason "…")`);
+    ctx.out(`next: radr address -e ${l.id} (the report gains a Verification section)`);
     if (r.run.status === "partial") ctx.out("  the run was partial: findings of lanes that didn't run clean stay fixed, not verified");
   },
 };

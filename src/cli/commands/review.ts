@@ -138,7 +138,7 @@ export const disposition: CommandSpec = {
       const known = id.startsWith("J-") ? readJudgments(l.judgments).some((j) => j.id === id) : readStore(l.findings).findings.some((f) => f.id === id);
       if (!known) throw new UsageError(`no finding ${id} in ${l.id}`);
       const from = stateOf(states, id);
-      checkTransition(from, to, reason);
+      checkTransition(from, to, reason, id);
       log.append("finding-disposition", actor, { finding_id: id, from, to, ...(reason !== undefined ? { reason } : {}) });
       ctx.out(`${id}: ${from} → ${to}`);
       return;
