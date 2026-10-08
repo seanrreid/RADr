@@ -17,7 +17,7 @@ what needs hands-on work.
 See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
 [M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md), [M5](docs/m5-plan.md), [M6](docs/m6-plan.md).
 
-**Status: M6 (v1 complete).** Read, Address and Debug work for **TS/JS, Python, Go, Rust,
+**Status: M6 (all six milestones).** Read, Address and Debug work for **TS/JS, Python, Go, Rust,
 JVM (Java/Kotlin), PHP, Ruby, and .NET**:
 
 - the deterministic core
