@@ -5,13 +5,17 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fixedClock } from "../../src/core/clock.js";
+import { hashBytes } from "../../src/core/determinism.js";
+import { runDebugScript, type DebugSandbox } from "../../src/debug/sandbox.js";
+import { checkoutWorktree } from "../../src/engagement/source.js";
 import { RefusedError } from "../../src/core/errors.js";
 import { assertCanConclude, assertCanDecide, getDebug, nextId, outcomeOf } from "../../src/debug/state.js";
 import { layout } from "../../src/engagement/home.js";
 import { EventLog } from "../../src/state/events.js";
 import { cliRunner } from "../helpers/cli.js";
 import { seedHome, setFakeTool } from "../helpers/fake-toolchain.js";
-import { REGRESSION_BAD_INDEX, REGRESSION_COMMITS, makeFixtureRepo, makeRegressionRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { REGRESSION_BAD_INDEX, REGRESSION_COMMITS, REGRESSION_REPRO, makeFixtureRepo, makeRegressionRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { localSandbox } from "../helpers/local-sandbox.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const fixtureRoot = tmpDir();
@@ -156,5 +160,70 @@ describe("the planted-regression fixture", () => {
     assert.deepEqual(a.commits, b.commits);
     assert.match(readFileSync(path.join(a.dir, "src/math.js"), "utf8"), /a === b \? 1 : 0/);
     assert.equal(a.commits.length - REGRESSION_BAD_INDEX, 8, "eight bad commits, twelve good");
+  });
+});
+
+describe("debug runs in the sandbox (M5 W1)", () => {
+  async function opened() {
+    const repo = await makeRegressionRepo(path.join(tmpDir(), "calc"));
+    const home = tmpDir();
+    await seedHome(home);
+    const radr = cliRunner(home);
+    await radr("init", "acme", "calc");
+    assert.equal((await radr("scope", "-e", "acme-calc", "--source", repo.dir)).code, 0);
+    assert.equal((await radr("approve", "scope", "-e", "acme-calc")).code, 0);
+    assert.equal((await radr("debug", "open", "--issue", "add(2, 2) returns 5", "-e", "acme-calc")).code, 0);
+    const l = layout(home, "acme-calc");
+    const script = path.join(l.debug, "D-0001", "repro", "repro.sh");
+    writeFileSync(script, REGRESSION_REPRO);
+    const log = new EventLog(l.events, fixedClock("2026-10-08T00:00:00.000Z"));
+    const sb = (over: Partial<DebugSandbox> = {}): DebugSandbox => ({
+      runtime: { name: "podman", version: "test" }, stack: "typescript-javascript", dir: ".", image: "test", install: "true",
+      prelude: "", env: {}, online: false, mounts: [], runner: localSandbox, ...over,
+    });
+    const spec = (worktree: string, commit: string) => ({ debugId: "D-0001", kind: "repro" as const, commit, worktree, script });
+    return { repo, radr, l, log, sb, spec, script };
+  }
+
+  it("reproduces at the bad commit, not at a good one, and records hashes that match the files", async () => {
+    const t = await opened();
+    const bad = t.repo.commits.at(-1) ?? "";
+    const r = await runDebugScript(t.l, t.log, "consultant", t.sb(), t.spec(t.l.worktree, bad));
+    assert.deepEqual([r.runId, r.exitCode, r.outcome], ["DR-0001", 1, "present"]);
+    const ev = t.log.read().findLast((e) => e.type === "debug-run");
+    assert.equal(ev?.data["script_hash"], hashBytes(readFileSync(t.script)));
+    assert.equal(ev.data["log_hash"], hashBytes(readFileSync(path.join(t.l.dir, r.logRef))));
+
+    const good = path.join(tmpDir(), "good");
+    await checkoutWorktree(t.l.mirror, good, t.repo.commits[0] ?? "");
+    const g = await runDebugScript(t.l, t.log, "consultant", t.sb(), t.spec(good, t.repo.commits[0] ?? ""));
+    assert.deepEqual([g.exitCode, g.outcome], [0, "absent"]);
+    assert.match((await t.radr("debug", "show", "D-0001", "-e", "acme-calc")).out, /DR-0001 {2}repro .* exit 1 → present/);
+  });
+
+  it("a failed install can't tell (skip); a sandbox that fails to run is an error", async () => {
+    const t = await opened();
+    const head = t.repo.commits.at(-1) ?? "";
+    const skip = await runDebugScript(t.l, t.log, "consultant", t.sb({ install: "exit 3" }), t.spec(t.l.worktree, head));
+    assert.deepEqual([skip.exitCode, skip.outcome], [null, "skip"]);
+    const timeout: DebugSandbox["runner"] = async (req, out) => {
+      const r = await localSandbox(req, out);
+      return { ...r, exec: { ...r.exec, outcome: "timeout", exitCode: null } };
+    };
+    const err = await runDebugScript(t.l, t.log, "consultant", t.sb({ runner: timeout }), t.spec(t.l.worktree, head));
+    assert.equal(err.outcome, "error");
+    assert.match(String(t.log.read().findLast((e) => e.type === "debug-run")?.data["detail"]), /timed out/);
+  });
+
+  it("freezes repro.sh once it has reproduced; without a runtime or recipe the CLI refuses clearly", async () => {
+    const t = await opened();
+    const r = await t.radr("debug", "repro", "D-0001", "-e", "acme-calc");
+    assert.equal(r.code, 1);
+    assert.match(r.err, /build recipe|container runtime/);
+    await runDebugScript(t.l, t.log, "consultant", t.sb(), t.spec(t.l.worktree, t.repo.commits.at(-1) ?? ""));
+    writeFileSync(t.script, `${REGRESSION_REPRO}# tweaked\n`);
+    const frozen = await t.radr("debug", "repro", "D-0001", "-e", "acme-calc");
+    assert.equal(frozen.code, 1);
+    assert.match(frozen.err, /repro\.sh changed after it reproduced the bug \(DR-0001\)/);
   });
 });

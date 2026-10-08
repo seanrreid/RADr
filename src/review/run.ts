@@ -95,7 +95,7 @@ function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: Tool
   return { byTool, lines };
 }
 
-function snapshotsFor(home: string, l: Layout): { osvDb: string | null; depsCache: string | null } {
+export function snapshotsFor(home: string, l: Layout): { osvDb: string | null; depsCache: string | null } {
   const snaps = readSnapshotsLock(l.snapshotsLock);
   let osvDb: string | null = null;
   if (snaps.osv !== null) {

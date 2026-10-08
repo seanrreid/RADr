@@ -4,18 +4,19 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { resolveActor } from "../../core/actor.js";
-import { UsageError } from "../../core/errors.js";
-import { getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
+import { RefusedError, UsageError } from "../../core/errors.js";
+import { debugSandbox, runDebugScript, scriptHash } from "../../debug/sandbox.js";
+import { assertOpen, getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
 import { radrHome, resolveEngagement, type Layout } from "../../engagement/home.js";
 import { readJudgments } from "../../findings/judgments.js";
 import { readStore } from "../../findings/store.js";
-import { assertScope } from "../../review/run.js";
+import { assertScope, snapshotsFor } from "../../review/run.js";
 import { EventLog } from "../../state/events.js";
 import { Gates } from "../../state/gates.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CliContext, CommandSpec } from "../context.js";
 
-const SUBCOMMANDS = ["open", "list", "show"] as const;
+const SUBCOMMANDS = ["open", "list", "show", "repro"] as const;
 
 /** debug/<id>/ and its evidence folders. */
 export function debugDir(l: Layout, id: string): { root: string; repro: string; experiments: string; guard: string; runs: string } {
@@ -52,6 +53,27 @@ async function open(args: readonly string[], ctx: CliContext): Promise<void> {
   for (const d of [dirs.repro, dirs.experiments, dirs.guard, dirs.runs]) mkdirSync(d, { recursive: true });
   ctx.out(`opened ${id} at ${doc.source.sha.slice(0, 12)}: ${symptom}`);
   ctx.out(`next: write ${path.join(dirs.repro, "repro.sh")} (exit 0 = bug absent, 125 = can't tell, other non-zero = bug present), then: radr debug repro ${id}`);
+}
+
+async function repro(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, stack: { type: "string" } }, 1);
+  const home = radrHome(ctx.env);
+  const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const { doc } = await assertScope(l, Gates.load(), log);
+  const d = getDebug(log.read(), positionals[0] ?? "");
+  assertOpen(d);
+  if (d.commit !== doc.source.sha) throw new RefusedError(`${d.id} was opened at ${d.commit.slice(0, 12)}, but the approved scope is now at ${doc.source.sha.slice(0, 12)}; open a new debug`);
+  const script = path.join(debugDir(l, d.id).repro, "repro.sh");
+  // Once the repro has reproduced, it's evidence other runs (bisect, guard) rely on: frozen.
+  const reproduced = reproducing(d)[0];
+  if (reproduced !== undefined && reproduced.scriptHash !== scriptHash(script)) {
+    throw new RefusedError(`repro.sh changed after it reproduced the bug (${reproduced.runId}); restore it, or open a new debug for a different repro`);
+  }
+  const sb = await debugSandbox(home, l, doc, ctx.env, snapshotsFor(home, l).depsCache, values.stack);
+  const r = await runDebugScript(l, log, await resolveActor(ctx.env), sb, { debugId: d.id, kind: "repro", commit: d.commit, worktree: l.worktree, script });
+  ctx.out(`${r.runId}: repro at ${d.commit.slice(0, 12)} exited ${String(r.exitCode)} → ${r.outcome === "present" ? "bug present (reproduced)" : r.outcome === "absent" ? "bug absent (not reproduced)" : r.outcome}`);
+  ctx.out(`  log: ${r.logRef}`);
 }
 
 function list(args: readonly string[], ctx: CliContext): void {
@@ -102,6 +124,7 @@ export const debug: CommandSpec = {
       case "show":
         show(rest, ctx);
         return;
+      case "repro": return repro(rest, ctx);
       default: throw new UsageError(`unknown debug subcommand "${sub ?? ""}" (expected: ${SUBCOMMANDS.join(", ")})`);
     }
   },
