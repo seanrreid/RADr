@@ -7,7 +7,7 @@ date: "2026-10-07"
 run: "R-0001"
 commit: "0c977cab73326b81d26c769aa406edc497d8c17c"
 verdict: "Needs attention"
-findings_set: "sha256:560c978770422a710a77f2618e25438b6bc2a11fdf4434c30a0ab6b00923dd98"
+findings_set: "sha256:e57827a404f50ba021fa520cb228fcffcb209eefa76bdd6e09102b7c90d8a069"
 dispositions: "sha256:6aebee0f0ac0d3b11f99ce06e6ab64db454638cae77015196291ca86d6d2bb6a"
 ---
 
@@ -37,7 +37,7 @@ _Write the executive summary here. radr preserves this block when the report is 
 
 - **CRITICAL** · AWS key (introduced in commit 98f8ed3e3ef3) (`config/deploy.env:2`, F-0001)
 - **HIGH** · Found \`subprocess\` function \`call\` with \`shell=True\`. (`app/main.py:7`, F-0002)
-- **HIGH** · npm lodash\@4.17.20: Command Injection in lodash (`package-lock.json`, F-0004)
+- **HIGH** · npm lodash\@4.17.20: Command Injection in lodash; upgrade to ≥ 4.17.21 (`package-lock.json`, F-0004)
 
 # Findings
 
@@ -49,10 +49,12 @@ _Write the executive summary here. radr preserves this block when the report is 
 
 ### Vulnerable dependencies
 
-| ID | Severity | State | Rule | Location | Finding |
-| -------- | --------- | ---------- | ---------------------- | ------------------- | -------------------------------- |
-| F-0004 | high | pending | `osv-scanner/GHSA-35jh-r3h4-6jhm` | `package-lock.json` | npm lodash\@4.17.20: Command Injection in lodash |
-| F-0006 | medium | confirmed | `osv-scanner/PYSEC-2018-28` | `requirements.txt` | PyPI requests\@2.19.1: The Requests package before 2.20.0 for Python sends an HTTP Authorization header to an http URI upon receiving a same-hostname https-to-http redirect, which ... |
+2 advisories in 2 package(s). Upgrading each package to the version shown resolves every advisory against it that has a fix.
+
+| Package | Severity | Advisories | Upgrade to | Location | Findings |
+| ------------------------ | --------- | ---------- | -------------------- | ----------------- | -------------------- |
+| npm lodash\@4.17.20 | high | 1 | ≥ 4.17.21 | `package-lock.json` | F-0004 |
+| PyPI requests\@2.19.1 | medium | 1 | ≥ 2.20.0 | `requirements.txt` | F-0006 |
 
 ### Security
 

@@ -7,6 +7,7 @@ import path from "node:path";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import type { Layout } from "../engagement/home.js";
 import { debugStates, guardHolds } from "../debug/state.js";
+import { groupByPackage, upgradeText, type PackageGroup } from "../findings/packages.js";
 import { coverageGaps } from "../review/coverage.js";
 import { findingsSetHash, readStore } from "../findings/store.js";
 import type { Finding, Severity } from "../findings/types.js";
@@ -77,10 +78,30 @@ function scorecardSection(card: Scorecard): string {
   ].join("\n");
 }
 
+/** Finding ids for a table cell: all of them when few, else the first few and a count. */
+const idList = (fs: readonly Finding[]): string => (fs.length <= 3 ? fs.map((f) => f.id).join(", ") : `${fs.slice(0, 2).map((f) => f.id).join(", ")} and ${String(fs.length - 2)} more`);
+
+/** One package's advisories as a sentence: "npm hono@4.11.7: 34 advisories; upgrade to ≥ 4.12.4". */
+const packageLine = (g: PackageGroup): string => {
+  const one = g.findings.length === 1 ? g.findings[0] : undefined;
+  const what = one === undefined ? `${g.ecosystem} ${g.pkg}: ${String(g.findings.length)} advisories` : one.message;
+  return g.upgradeTo === null ? `${what}; no fixed version known` : `${what}; upgrade to ${upgradeText(g)}`;
+};
+
 function topRisks(inp: RunInputs): string {
-  const risky = bySeverity(live(inp).filter((f) => sevRank(f.severity) >= sevRank("high"))).slice(0, TOP_RISKS);
-  if (risky.length === 0) return "No critical or high-severity findings.";
-  return risky.map((f) => `- **${f.severity.toUpperCase()}** · ${esc(f.message)} (${code(loc(f))}, ${f.id})`).join("\n");
+  // Dependency advisories collapse to one bullet per package (user decision 2026-10-08).
+  // Group all of a package's advisories (so the upgrade target matches the findings table), then
+  // keep the packages, and the other findings, at high or above.
+  const high = (s: Severity) => sevRank(s) >= sevRank("high");
+  const all = groupByPackage(live(inp));
+  const groups = all.groups.filter((g) => high(g.severity));
+  const rest = all.rest.filter((f) => high(f.severity));
+  const items = stableSort([
+    ...groups.map((g) => ({ sev: g.severity, key: g.findings[0]?.id ?? "", text: `${esc(packageLine(g))} (${code(g.files.join(", "))}, ${idList(g.findings)})` })),
+    ...rest.map((f) => ({ sev: f.severity, key: f.id, text: `${esc(f.message)} (${code(loc(f))}, ${f.id})` })),
+  ], (x) => [-sevRank(x.sev), x.key]).slice(0, TOP_RISKS);
+  if (items.length === 0) return "No critical or high-severity findings.";
+  return items.map((x) => `- **${x.sev.toUpperCase()}** · ${x.text}`).join("\n");
 }
 
 function findingsByCategory(inp: RunInputs, order: readonly string[] = CATEGORY_ORDER): string {
@@ -88,6 +109,7 @@ function findingsByCategory(inp: RunInputs, order: readonly string[] = CATEGORY_
   const cats = stableSort([...new Set(fs.map((f) => f.category))], (c) => [order.indexOf(c) === -1 ? 99 : order.indexOf(c), c]);
   if (cats.length === 0) return "No open findings.";
   return cats.map((c) => {
+    if (c === "dependency") return [`### ${CATEGORY_TITLES[c] ?? c}`, "", dependencyTable(fs.filter((f) => f.category === c))].join("\n");
     const rows = bySeverity(fs.filter((f) => f.category === c)).map((f) => [f.id, f.severity, esc(state(inp, f)), code(`${f.tool}/${f.rule_id}`), code(loc(f)), esc(f.message)]);
     return [`### ${CATEGORY_TITLES[c] ?? esc(c)}`, "", table(["ID", "Severity", "State", "Rule", "Location", "Finding"], rows, [8, 9, 10, 22, 19, 32])].join("\n");
   }).join("\n\n");
@@ -302,12 +324,29 @@ function coverageSectionGaps(inp: RunInputs): string | null {
 /** EPSS in basis points as a percentage with two decimals, without floats. */
 const epssPct = (bp: number | null): string => (bp === null ? "—" : `${String(Math.floor(bp / 100))}.${String(bp % 100).padStart(2, "0")}%`);
 
+/** Vulnerable dependencies, one row per package (every advisory stays in the appendix). */
+function dependencyTable(fs: readonly Finding[]): string {
+  const { groups, rest } = groupByPackage(fs);
+  const rows = groups.map((g) => [esc(`${g.ecosystem} ${g.pkg}`), g.severity, String(g.findings.length), esc(upgradeText(g)), code(g.files.join(", ")), idList(g.findings)]);
+  const parts = [
+    `${String(fs.length)} advisories in ${String(groups.length)} package(s). Upgrading each package to the version shown resolves every advisory against it that has a fix.`,
+    "",
+    table(["Package", "Severity", "Advisories", "Upgrade to", "Location", "Findings"], rows, [24, 9, 10, 20, 17, 20]),
+  ];
+  if (rest.length > 0) parts.push("", table(["ID", "Severity", "Rule", "Location", "Finding"], bySeverity(rest).map((f) => [f.id, f.severity, code(`${f.tool}/${f.rule_id}`), code(loc(f)), esc(f.message)])));
+  return parts.join("\n");
+}
+
 function vulnerabilities(inp: RunInputs): string {
-  const fs = bySeverity(live(inp).filter((f) => f.cve !== null || f.aliases.some((a) => a.startsWith("CVE-"))));
+  const fs = live(inp).filter((f) => f.cve !== null || f.aliases.some((a) => a.startsWith("CVE-")));
   if (fs.length === 0) return "No findings with a known CVE.";
-  return table(["ID", "Severity", "CVE", "CVSS", "EPSS", "KEV", "Location"], fs.map((f) => [
-    f.id, f.severity, code(f.cve ?? f.aliases.find((a) => a.startsWith("CVE-")) ?? ""), f.cvss ?? "—", epssPct(f.epss_bp), f.kev === null ? "—" : f.kev ? "yes" : "no", code(loc(f)),
-  ]));
+  // One row per package; findings with a CVE but no package (rare) keep their own row.
+  const { groups, rest } = groupByPackage(fs);
+  const rows = [
+    ...groups.map((g) => [esc(`${g.ecosystem} ${g.pkg}`), g.severity, String(g.cves.length), g.maxCvss ?? "—", epssPct(g.maxEpssBp), g.findings.some((f) => f.kev !== null) ? (g.kev ? "yes" : "no") : "—", esc(upgradeText(g))]),
+    ...bySeverity(rest).map((f) => [code(loc(f)), f.severity, "1", f.cvss ?? "—", epssPct(f.epss_bp), f.kev === null ? "—" : f.kev ? "yes" : "no", f.id]),
+  ];
+  return table(["Package", "Severity", "CVEs", "Max CVSS", "Max EPSS", "KEV", "Upgrade to"], rows);
 }
 
 function secretsSection(inp: RunInputs): string {

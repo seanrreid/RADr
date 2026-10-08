@@ -56,7 +56,7 @@ describe("remediation plan", () => {
     const states = new Map<string, DispositionState>([["F-0002", "dismissed"], ["F-0007", "waived"]]);
     const waves = buildPlan(findings, states, { "dependency-upgrade": "S", "secret-rotation": "S", "lint-cleanup": "S" });
     const w1 = waves[0]?.items ?? [];
-    assert.deepEqual(w1.map((i) => i.title), ["Upgrade lodash@4.17.20 (CVE-1, CVE-2)", "Rotate the credential exposed in git history (a.py); it is no longer in the current code, but anyone with the repository can recover it"]);
+    assert.deepEqual(w1.map((i) => i.title), ["Upgrade lodash@4.17.20 (2 advisories; no fixed version known)", "Rotate the credential exposed in git history (a.py); it is no longer in the current code, but anyone with the repository can recover it"]);
     assert.deepEqual(w1[0]?.findings, ["F-0003", "F-0004"]);
     const all = waves.flatMap((w) => w.items.flatMap((i) => i.findings));
     assert.ok(!all.includes("F-0002") && !all.includes("F-0007"), "dismissed and waived findings need no remediation");

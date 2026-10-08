@@ -7,6 +7,7 @@ import { stableSort } from "../core/determinism.js";
 import type { DispositionState } from "../findings/disposition.js";
 import type { Finding, Severity } from "../findings/types.js";
 import { sevRank } from "../rubric/rubric.js";
+import { groupByPackage, upgradeText } from "../findings/packages.js";
 
 export type ItemKind = "dependency-upgrade" | "secret-rotation" | "lint-cleanup" | "type-errors" | "sast-fix" | "build-reproducibility" | "test-coverage" | "flaky-tests"
   | "reduce-complexity" | "deduplicate" | "iac-hardening" | "license-review" | "repo-hygiene";
@@ -65,8 +66,9 @@ function titleFor(kind: ItemKind, group: readonly Finding[]): string {
   switch (kind) {
     case "dependency-upgrade": {
       const pkg = f.tags.find((t) => t.startsWith("package:"))?.slice("package:".length) ?? f.file;
-      const ids = stableSort([...new Set(group.flatMap((g) => (g.cve !== null ? [g.cve] : [g.rule_id])))], (x) => x);
-      return `Upgrade ${pkg} (${ids.join(", ")})`;
+      const g = groupByPackage(group).groups[0];
+      const advisories = n === 1 ? (f.cve ?? f.rule_id) : `${String(n)} advisories`;
+      return g === undefined || g.upgradeTo === null ? `Upgrade ${pkg} (${advisories}; no fixed version known)` : `Upgrade ${pkg} to ${upgradeText(g)} (${advisories})`;
     }
     case "secret-rotation":
       return f.tags.includes("history-only")

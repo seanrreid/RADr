@@ -7,7 +7,7 @@ date: "2026-10-07"
 run: "R-0001"
 commit: "0c977cab73326b81d26c769aa406edc497d8c17c"
 verdict: "Needs attention"
-findings_set: "sha256:d9367cd60752354a157422db213d6da01f93aba01bf171b3bbbc89016d135469"
+findings_set: "sha256:4cdbaeedd4481c9ed8c214d6dea9a1fea7a5fd9d2fd817fd7c80da2b66f7b775"
 dispositions: "sha256:6a8da0d9f666d09e0969318fe8e7a55f3e57f2c59d371d5d8e4bb9491b5cb924"
 ---
 
@@ -36,7 +36,7 @@ _Write the executive summary here. radr preserves this block when the report is 
 # Top risks
 
 - **CRITICAL** · AWS key (introduced in commit 98f8ed3e3ef3) (`config/deploy.env:2`, F-0001)
-- **HIGH** · npm lodash\@4.17.20: Command Injection in lodash (`package-lock.json`, F-0003)
+- **HIGH** · npm lodash\@4.17.20: Command Injection in lodash; upgrade to ≥ 4.17.21 (`package-lock.json`, F-0003)
 
 # Methodology
 

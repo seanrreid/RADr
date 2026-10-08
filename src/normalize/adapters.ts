@@ -2,6 +2,7 @@
 // golden-tested against fixed raw input (test/golden/<tool>/). An adapter that sees output it
 // doesn't understand throws ParseError → lane outcome `parse-error`; it never guesses.
 
+import { compareVersions } from "../findings/packages.js";
 import { DeterminismError, normalizePath, stableSort } from "../core/determinism.js";
 import type { FindingDraft } from "../findings/types.js";
 
@@ -168,6 +169,38 @@ export function gitleaksAdapter(input: AdapterInput & { readonly presentAtHead: 
 }
 
 /** osv-scanner `--format json`: one finding per (source, package, advisory group). */
+/**
+ * `fixed:<version>`: the version that fixes `version` of this package, from the advisories'
+ * affected ranges (the range whose introduced <= version < fixed). Several advisories in a group:
+ * the highest such fix. None (no fix, or only last_affected): no tag.
+ */
+function fixedTag(members: readonly Readonly<Record<string, unknown>>[], eco: string, name: string, version: string): string[] {
+  const fixes: string[] = [];
+  for (const v of members) {
+    for (const a of Array.isArray(v["affected"]) ? v["affected"] : []) {
+      const pkg = (a as { package?: { ecosystem?: unknown; name?: unknown } }).package;
+      if (pkg?.ecosystem !== eco || pkg.name !== name) continue;
+      for (const r of (a as { ranges?: unknown[] }).ranges ?? []) {
+        // GIT ranges are keyed by commit hashes, not versions: only SEMVER/ECOSYSTEM say what to upgrade to.
+        const type = (r as { type?: unknown }).type;
+        if (type !== "SEMVER" && type !== "ECOSYSTEM") continue;
+        let introduced: string | null = null;
+        for (const e of ((r as { events?: unknown[] }).events ?? []) as Record<string, unknown>[]) {
+          if (typeof e["introduced"] === "string") introduced = e["introduced"];
+          const fixed = e["fixed"];
+          if (typeof fixed === "string" && introduced !== null) {
+            const inRange = (introduced === "0" || compareVersions(version, introduced) >= 0) && compareVersions(version, fixed) < 0;
+            if (inRange) fixes.push(fixed);
+            introduced = null;
+          }
+        }
+      }
+    }
+  }
+  if (fixes.length === 0) return [];
+  return [`fixed:${fixes.reduce((x, y) => (compareVersions(x, y) >= 0 ? x : y))}`];
+}
+
 export function osvAdapter(input: AdapterInput): FindingDraft[] {
   const out: FindingDraft[] = [];
   const root = obj(parseJson(input.raw, "osv-scanner"), "osv-scanner");
@@ -209,7 +242,7 @@ export function osvAdapter(input: AdapterInput): FindingDraft[] {
           aliases,
           cvss: maxSev,
           raw_ref: `${input.rawRef}#/results/${ri}/packages/${pi}/groups/${gi}`,
-          tags: [`ecosystem:${eco}`, `package:${name}@${version}`],
+          tags: [`ecosystem:${eco}`, `package:${name}@${version}`, ...fixedTag(members, eco, name, version)],
         });
       });
     });

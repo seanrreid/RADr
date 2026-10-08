@@ -6,6 +6,7 @@
 // .hadolint.yaml can't silently suppress baseline checks. Inline suppression comments in the
 // code are still honored by the tools, as with lint.
 
+import { TEST_GLOBS } from "./metrics.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ParseError } from "../normalize/adapters.js";
@@ -36,6 +37,9 @@ export const JSCPD_IGNORE = [
   "**/.git/**", "**/node_modules/**",
   "**/pnpm-lock.yaml", "**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/bun.lock", "**/*.lock", "**/go.sum", "**/gradle.lockfile",
   "**/*.md", "**/*.mdx", "**/*.markdown",
+  // Test code (user decision 2026-10-08): repeated setup across tests isn't the duplication a
+  // client should act on; the score measures production code.
+  ...TEST_GLOBS,
 ].join(",");
 
 export const maint: Lane = {
