@@ -8,10 +8,11 @@ import { ESLINT_BASELINE } from "../toolchain/install.js";
 import { OSV_SUBDIR, STACK_ECOSYSTEM } from "../toolchain/db.js";
 import { stableSort } from "../core/determinism.js";
 import { execOutcome, rawDir, recordRun, toolEnv, type Lane, type ToolRun } from "./lane.js";
-import { bin, combine, realWorktree, snippetReader, step, type StepOutcome } from "./steps.js";
+import { bin, combine, listFiles, realWorktree, snippetReader, step, type StepOutcome } from "./steps.js";
 import { hygiene, iac, license, maint } from "./health.js";
 import { history, tests } from "./metrics.js";
-import { coverage, eslintProject, stackLint, types } from "./sandboxed.js";
+import { coverage, eslintProject, stackLint, stackLintSkipped, types } from "./sandboxed.js";
+import { lockfiles, sastCoverage } from "../review/coverage.js";
 
 export const census: Lane = {
   id: "census",
@@ -67,8 +68,14 @@ export const lint: Lane = {
     }
     // M3 W5: golangci-lint, clippy, PMD, RuboCop, .NET analyzers run in the stack sandboxes
     // (they need the stack's toolchain). Triage stays static-only.
-    if (ctx.doc.tier !== "triage") steps.push(...(await stackLint(ctx)));
-    return combine(steps);
+    const stack = ctx.doc.tier === "triage" ? stackLintSkipped(ctx, "the triage tier runs static linters only") : await stackLint(ctx);
+    steps.push(...stack.parts);
+    // Coverage: which stacks were linted, and why the others weren't.
+    const host = [
+      ...(ctx.doc.stacks.includes("typescript-javascript") && steps.some((x) => x.run?.tool === "eslint" && x.outcome === "success") ? ["typescript-javascript"] : []),
+      ...(ctx.doc.stacks.includes("python") && steps.some((x) => x.run?.tool === "ruff" && x.outcome === "success") ? ["python"] : []),
+    ];
+    return combine(steps, { linted: [...host, ...stack.linted].sort(), skipped: stack.skipped });
   },
 };
 
@@ -135,7 +142,8 @@ export const sca: Lane = {
     const syft = await step(ctx, "sca", "syft", "syft.log",
       () => ctx.tools.exec({ command: bin(ctx, "syft"), args: ["scan", "dir:.", "-o", `spdx-json=${sbomPath}`, "-q"], cwd: wt, env: toolEnv(ctx, { SYFT_CHECK_FOR_APP_UPDATE: "false" }) }),
       () => []);
-    return combine([osv, syft]);
+    // Coverage: which lockfiles there were to read. None means "not assessed", not "no vulns".
+    return combine([osv, syft], { lockfiles: lockfiles(listFiles(wt)) });
   },
 };
 
@@ -150,14 +158,18 @@ export const sast: Lane = {
     const wt = realWorktree(ctx);
     const packs = ctx.doc.rule_packs ?? ["authored", "pack", "lgpl"];
     const configs = packs.flatMap((p) => ["--config", path.join(ctx.tools.rulesDir, p)]);
+    const metrics: Record<string, unknown> = {};
     const s = await step(ctx, "sast", "opengrep", "opengrep.json",
       () => ctx.tools.exec({
         command: bin(ctx, "opengrep"),
         args: ["scan", "--no-rewrite-rule-ids", ...configs, "--json", "--quiet", "."],
         cwd: wt, env: toolEnv(ctx, OPENGREP_ENV), okExitCodes: [0, 1], timeoutMs: 30 * 60 * 1000,
       }),
-      (raw, ref) => opengrepAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["opengrep"] ?? "", snippet: snippetReader(wt) }));
-    return combine([s]);
+      (raw, ref) => {
+        Object.assign(metrics, sastCoverage(raw, ctx.metrics["census"]));
+        return opengrepAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["opengrep"] ?? "", snippet: snippetReader(wt) });
+      });
+    return combine([s], metrics);
   },
 };
 

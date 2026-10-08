@@ -304,16 +304,47 @@ export async function stackTypes(ctx: LaneContext): Promise<Part[]> {
 }
 
 /** Sandboxed linters of the W5 stacks (lint lane, baseline mode). Skipped, with a note, without a runtime. */
-export async function stackLint(ctx: LaneContext): Promise<Part[]> {
+export interface StackLint {
+  readonly parts: Part[];
+  /** Stacks whose linter ran to a parsed result. */
+  readonly linted: string[];
+  /** Sandboxed-linter stacks in scope that weren't linted, and why (coverage, M6 dogfood). */
+  readonly skipped: { stack: string; why: string }[];
+}
+
+const SANDBOX_LINT_STACKS = ["go", "rust", "java-kotlin", "php", "ruby", "csharp"];
+
+/** Every sandbox-linter stack in scope, skipped for one reason. */
+export function stackLintSkipped(ctx: LaneContext, why: string): StackLint {
+  return { parts: [], linted: [], skipped: ctx.doc.stacks.filter((s) => SANDBOX_LINT_STACKS.includes(s)).map((stack) => ({ stack, why })) };
+}
+
+export async function stackLint(ctx: LaneContext): Promise<StackLint> {
   const ds = drivers(ctx.doc.build, ctx.doc.stacks, ctx.doc.network.mode === "network").filter((x) => x.driver.lint() !== null);
-  if (ds.length === 0) return [];
-  if (ctx.tools.sandbox === null) return [{ outcome: "success", findings: [], detail: `${ds.map((x) => x.driver.stack).join(", ")} linters need the build sandbox (no container runtime)` }];
-  const parts: Part[] = [];
+  const withRecipe = new Set(ds.map((x) => x.driver.stack as string));
+  const noRecipe = ctx.doc.stacks.filter((s) => SANDBOX_LINT_STACKS.includes(s) && !withRecipe.has(s))
+    .map((stack) => ({ stack, why: "the stack's build environment wasn't set up for this review" }));
+  // The consultant-facing how-to-fix goes in the lane detail; the report states the gap neutrally.
+  const hint = noRecipe.length > 0 ? [{ outcome: "success" as const, findings: [], detail: `${noRecipe.map((x) => x.stack).join(", ")}: no build recipe, so no sandboxed linter (re-scope with Podman or Docker running so radr can propose one)` }] : [];
+  if (ds.length === 0) return { parts: hint, linted: [], skipped: noRecipe };
+  if (ctx.tools.sandbox === null) {
+    return {
+      parts: [{ outcome: "success", findings: [], detail: `${ds.map((x) => x.driver.stack).join(", ")} linters need the build sandbox (no container runtime)` }],
+      linted: [], skipped: [...noRecipe, ...ds.map((x) => ({ stack: x.driver.stack, why: "the stack's build environment wasn't available for this review" }))],
+    };
+  }
+  const parts: Part[] = [...hint];
+  const linted: string[] = [];
+  const skipped = [...noRecipe];
   for (const { driver, recipe, dotnetSdk } of ds) {
     const step = driver.lint();
-    if (step !== null) parts.push(await analyze(ctx, "lint", driver, recipe.dir, step, dotnetSdk));
+    if (step === null) continue;
+    const p = await analyze(ctx, "lint", driver, recipe.dir, step, dotnetSdk);
+    parts.push(p);
+    if (p.outcome === "success") linted.push(driver.stack);
+    else skipped.push({ stack: driver.stack, why: `the linter ended ${p.outcome}` });
   }
-  return parts;
+  return { parts, linted, skipped };
 }
 
 /** Tests (and, for Go, statement coverage) of the W5 stacks (coverage lane). */

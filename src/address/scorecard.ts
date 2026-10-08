@@ -42,6 +42,11 @@ function rateNumeric(spec: ScorecardSpec["metrics"][string], value: number | nul
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
 
 /** Raw numeric values per metric key; null = unavailable. Integer arithmetic only. */
+function nothingLinted(lint: Readonly<Record<string, unknown>> | undefined): boolean {
+  const linted = lint?.["linted"];
+  return Array.isArray(linted) && linted.length === 0;
+}
+
 export function metricValues(inp: ScorecardInputs): Record<string, number | null> {
   const live = inp.findings.filter((f) => inp.states.get(f.id) !== "dismissed");
   const census = inp.metrics["census"] as CensusMetrics | undefined;
@@ -51,8 +56,9 @@ export function metricValues(inp: ScorecardInputs): Record<string, number | null
   const sourceCode = num(tests?.["source_code"]);
   const lintErrors = live.filter((f) => f.lane === "lint" && LINT_ERROR_SEVERITIES.has(f.tool_severity)).length;
   return {
+    // No linter ran for any stack in scope: not measured, never 0 (dogfood 2026-10-08).
     lint_errors_per_kloc_x10:
-      inp.lanesRun.has("lint") && census !== undefined && sourceCode !== null && sourceCode > 0 ? Math.floor((lintErrors * 10000) / sourceCode) : null,
+      inp.lanesRun.has("lint") && census !== undefined && sourceCode !== null && sourceCode > 0 && !nothingLinted(inp.metrics["lint"]) ? Math.floor((lintErrors * 10000) / sourceCode) : null,
     type_errors: inp.lanesRun.has("types") ? live.filter((f) => f.lane === "types" && f.tool_severity === "error").length : null,
     duplication_pct: num(maint?.["duplication_pct"]),
     complex_functions_pct: num(maint?.["complex_functions_pct"]),
@@ -66,6 +72,9 @@ function rateCategorical(key: string, inp: ScorecardInputs): { value: string | n
   const live = inp.findings.filter((f) => inp.states.get(f.id) !== "dismissed");
   if (key === "dependency_vulns") {
     if (!inp.lanesRun.has("sca")) return { value: null, rating: "grey" };
+    // No lockfile to read means nothing was assessed: never "none" (dogfood 2026-10-08).
+    const locks = inp.metrics["sca"]?.["lockfiles"];
+    if (Array.isArray(locks) && locks.length === 0) return { value: null, rating: "grey" };
     const deps = live.filter((f) => f.lane === "sca");
     if (deps.some((f) => f.severity === "critical" || f.kev === true)) return { value: "critical or known-exploited present", rating: "red" };
     if (deps.some((f) => f.severity === "high")) return { value: "high present", rating: "amber" };

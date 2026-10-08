@@ -7,6 +7,7 @@ import path from "node:path";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import type { Layout } from "../engagement/home.js";
 import { debugStates, guardHolds } from "../debug/state.js";
+import { coverageGaps } from "../review/coverage.js";
 import { findingsSetHash, readStore } from "../findings/store.js";
 import type { Finding, Severity } from "../findings/types.js";
 import { SEVERITIES } from "../findings/types.js";
@@ -163,7 +164,9 @@ function methodology(inp: RunInputs, l: Layout): string {
     table(["Lane", "Outcome"], laneRows),
     ...sastSupport(inp),
   ];
-  if (inp.notes.length > 0) lines.push("", "**Gaps**", "", ...inp.notes.map((n) => `- ${esc(n)}`));
+  // Coverage gaps have their own section near the top; the rest of the run's notes stay here.
+  const other = inp.notes.filter((n) => !n.startsWith("not assessed: "));
+  if (other.length > 0) lines.push("", "**Gaps**", "", ...other.map((n) => `- ${esc(n)}`));
   if (defs !== undefined) {
     lines.push("", "**Severity definitions**", "", table(["Severity", "Meaning"], [...SEVERITIES].reverse().map((s: Severity) => [s, esc(defs[s])]), [14, 86]));
   }
@@ -233,7 +236,7 @@ function planSummary(waves: readonly PlanWave[]): string {
 type SectionId =
   | "executive-summary" | "at-a-glance" | "top-risks" | "key-risks" | "findings" | "judgments" | "coverage" | "licenses"
   | "hygiene" | "remediation" | "recommendations" | "verification" | "methodology" | "appendix"
-  | "security-posture" | "vulnerabilities" | "secrets" | "maintainability" | "hotspots" | "license-risk";
+  | "security-posture" | "vulnerabilities" | "secrets" | "maintainability" | "hotspots" | "license-risk" | "coverage-gaps";
 
 interface Template {
   readonly sections: readonly SectionId[];
@@ -241,7 +244,7 @@ interface Template {
 }
 
 const BALANCED: Template = {
-  sections: ["executive-summary", "at-a-glance", "top-risks", "findings", "judgments", "coverage", "licenses", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+  sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "findings", "judgments", "coverage", "licenses", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
   categoryOrder: CATEGORY_ORDER,
 };
 
@@ -249,20 +252,20 @@ export const TEMPLATES: Readonly<Record<string, Template>> = {
   "health-audit": BALANCED,
   "pr-review": BALANCED,
   debug: BALANCED,
-  triage: { sections: ["executive-summary", "at-a-glance", "top-risks", "judgments", "verification", "methodology"], categoryOrder: CATEGORY_ORDER },
+  triage: { sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "judgments", "verification", "methodology"], categoryOrder: CATEGORY_ORDER },
   // Code quality: lint, types, complexity, duplication, tests first; security still reported.
   quality: {
-    sections: ["executive-summary", "at-a-glance", "top-risks", "maintainability", "findings", "judgments", "coverage", "remediation", "recommendations", "licenses", "hygiene", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "maintainability", "findings", "judgments", "coverage", "remediation", "recommendations", "licenses", "hygiene", "verification", "methodology", "appendix"],
     categoryOrder: ["quality", "maintainability", "test", "coverage", "security", "secrets", "dependency", "iac", "license"],
   },
   // Security: posture, secrets, and vulnerabilities with CVSS/EPSS/KEV first.
   security: {
-    sections: ["executive-summary", "security-posture", "top-risks", "secrets", "vulnerabilities", "findings", "judgments", "licenses", "remediation", "recommendations", "at-a-glance", "coverage", "hygiene", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "security-posture", "coverage-gaps", "top-risks", "secrets", "vulnerabilities", "findings", "judgments", "licenses", "remediation", "recommendations", "at-a-glance", "coverage", "hygiene", "verification", "methodology", "appendix"],
     categoryOrder: ["secrets", "security", "dependency", "iac", "license", "maintainability", "test", "quality", "coverage"],
   },
   // Due diligence: exec-first; risks a buyer weighs (hotspots, bus factor, licenses, CVEs).
   "due-diligence": {
-    sections: ["executive-summary", "key-risks", "at-a-glance", "hotspots", "license-risk", "vulnerabilities", "maintainability", "findings", "judgments", "coverage", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "key-risks", "at-a-glance", "coverage-gaps", "hotspots", "license-risk", "vulnerabilities", "maintainability", "findings", "judgments", "coverage", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
     categoryOrder: ["license", "secrets", "dependency", "security", "maintainability", "test", "coverage", "iac", "quality"],
   },
 };
@@ -282,6 +285,17 @@ function securityPosture(inp: RunInputs): string {
     table(["Area", "Critical", "High", "Medium", "Low", "Info"], rows),
     "",
     `Known-exploited (CISA KEV): ${String(kev)}. Likely to be exploited (EPSS 10% or more): ${String(epss)}. Dismissed findings are not counted.`,
+  ].join("\n");
+}
+
+/** Coverage gaps (src/review/coverage.ts), recomputed from the run's metrics. */
+function coverageSectionGaps(inp: RunInputs): string | null {
+  const gaps = coverageGaps(inp.doc, inp.metrics);
+  if (gaps.length === 0) return null;
+  return [
+    "A check that finds nothing only means something if it looked. These parts of the codebase were not assessed, so the absence of findings there says nothing about them:",
+    "",
+    ...gaps.map((g) => `- ${esc(g)}`),
   ].join("\n");
 }
 
@@ -360,6 +374,7 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     maintainability: () => ["Maintainability", maintainability(inp)],
     hotspots: () => ["Hotspots and ownership", hotspots(inp)],
     // Due diligence: license risk is a deal term, so its absence is stated, never silent.
+    "coverage-gaps": () => ["What this review could not assess", coverageSectionGaps(inp)],
     "license-risk": () => ["License risk", licenseSection(inp) ?? "License compliance was not assessed in this run: the license lane runs only in container mode (`network: { mode: offline, enforcement: container }`). Treat license risk as unknown."],
   };
   const parts = [frontMatter(inp, l, card, runDate)];

@@ -101,7 +101,7 @@ export function renderSarif(doc: EngagementDoc, runId: string, findings: readonl
   return `${canonicalJson(sarif)}\n`;
 }
 
-export function renderPrSummary(doc: EngagementDoc, runId: string, findings: readonly Finding[], suppressed: number): string {
+export function renderPrSummary(doc: EngagementDoc, runId: string, findings: readonly Finding[], suppressed: number, gaps: readonly string[] = []): string {
   if (doc.diff === undefined) throw new InternalError("the PR summary is for diff scopes");
   const fs = bySeverity(findings);
   const esc = (s: string) => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
@@ -115,16 +115,18 @@ export function renderPrSummary(doc: EngagementDoc, runId: string, findings: rea
     lines.push("", "| Severity | Rule | Location | Finding |", "| --- | --- | --- | --- |");
     for (const f of fs) lines.push(`| ${f.severity} | \`${esc(ruleId(f))}\` | \`${esc(f.line > 0 ? `${f.file}:${String(f.line)}` : f.file)}\` | ${esc(f.message)} |`);
   }
+  // "No new findings" only means what was assessed: say what wasn't (dogfood 2026-10-08).
+  if (gaps.length > 0) lines.push("", "**Not assessed in this review:**", "", ...gaps.map((g) => `- ${esc(g)}`));
   lines.push("", `<sub>radr ${runId} · rubric ${doc.rubric} · only findings in files this change touches, and not in the baseline (${String(suppressed)} suppressed). Severity comes from the rubric, not from an AI model.</sub>`);
   return `${lines.join("\n")}\n`;
 }
 
 /** Write both outputs under review/; returns their refs and hashes for the run-completed event. */
-export function writePrOutputs(l: Layout, doc: EngagementDoc, runId: string, findings: readonly Finding[], suppressed: number): { ref: string; hash: string }[] {
+export function writePrOutputs(l: Layout, doc: EngagementDoc, runId: string, findings: readonly Finding[], suppressed: number, gaps: readonly string[] = []): { ref: string; hash: string }[] {
   const dir = path.join(l.dir, "review");
   mkdirSync(dir, { recursive: true });
   const stem = `pr-${doc.source.sha.slice(0, 12)}`;
-  return [[`${stem}.sarif`, renderSarif(doc, runId, findings)], [`${stem}.md`, renderPrSummary(doc, runId, findings, suppressed)]].map(([name = "", body = ""]) => {
+  return [[`${stem}.sarif`, renderSarif(doc, runId, findings)], [`${stem}.md`, renderPrSummary(doc, runId, findings, suppressed, gaps)]].map(([name = "", body = ""]) => {
     writeFileSync(path.join(dir, name), body);
     return { ref: `review/${name}`, hash: hashBytes(body) };
   });

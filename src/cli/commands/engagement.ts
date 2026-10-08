@@ -46,7 +46,7 @@ export const scope: CommandSpec = {
     });
     ctx.out(`${r.created ? "proposed" : "updated"} scope for ${l.id} at ${r.doc.source.sha}`);
     ctx.out(`  stacks: ${r.doc.stacks.join(", ") || "(none detected)"}`);
-    if (r.detection.unsupported.length > 0) ctx.out(`  not yet supported (M3): ${r.detection.unsupported.join(", ")}`);
+    if (r.detection.unsupported.length > 0) ctx.out(`  not a supported stack: ${r.detection.unsupported.join(", ")} (secrets, complexity, duplication and history still cover it; the report will say what wasn't assessed)`);
     ctx.out(`  fingerprint: ${r.fingerprint}`);
     for (const w of r.warnings) ctx.out(`  warning: ${w}`);
     ctx.out(`review ${l.engagementYml}, then: radr approve scope -e ${l.id}`);

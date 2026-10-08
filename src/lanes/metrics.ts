@@ -3,6 +3,7 @@
 // The history window is anchored to the approved commit's own committer date, never "now".
 
 import { stableSort } from "../core/determinism.js";
+import { CODE_LANGUAGES } from "../review/coverage.js";
 import { matchesAny } from "../core/glob.js";
 
 import type { CensusMetrics } from "../normalize/adapters.js";
@@ -120,17 +121,17 @@ export const history: Lane = {
   },
 };
 
-/** Paths that are tests, across the supported stacks. */
+/**
+ * Paths that are tests, across the supported stacks and common conventions: Swift and .NET use
+ * capitalized Tests/ (and *.Tests/) directories and *Tests / *Test file names (dogfood 2026-10-08).
+ */
 export const TEST_GLOBS = [
   "**/test/**", "**/tests/**", "**/__tests__/**", "**/spec/**", "**/*.test.*", "**/*.spec.*",
   "**/test_*.py", "**/*_test.py", "**/*_test.go", "**/conftest.py",
+  "**/Tests/**", "**/*Tests/**", "**/*.Tests/**", "**/*Tests.swift", "**/*Test.swift",
+  "**/*Test.java", "**/*Test.kt", "**/*Tests.java", "**/*Tests.kt", "**/*Test.php", "**/*_spec.rb", "**/*Tests.cs", "**/*Test.cs",
 ];
 
-/** Languages scc reports that count as program source (not data, docs, or config). */
-const CODE_LANGUAGES = new Set([
-  "TypeScript", "TypeScript Typings", "JavaScript", "TSX", "JSX", "Python", "Go", "Rust", "Java", "Kotlin", "PHP", "Ruby", "C#",
-  "Vue", "Svelte", "Scala", "Swift", "C", "C++", "C Header", "C++ Header",
-]);
 
 export function testMetrics(census: CensusMetrics): Record<string, unknown> {
   let testFiles = 0;

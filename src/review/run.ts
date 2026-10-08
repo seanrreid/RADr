@@ -22,6 +22,7 @@ import type { Finding } from "../findings/types.js";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import { changedFiles, diffFilter, readBaseline } from "../diff/baseline.js";
 import { writePrOutputs } from "../diff/outputs.js";
+import { coverageGaps } from "./coverage.js";
 import { writeScopeSnapshot } from "./scope-snapshot.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { loadVulnContext } from "../toolchain/vulnctx.js";
@@ -260,6 +261,7 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     const vulns = loadVulnContext(home, { epss: pinned.epss, kev: pinned.kev });
     if (drafts.some((d) => d.cve !== null)) notes = vulns.gaps;
     ingested = ingest(l.findings, runId, doc, rubric, drafts, vulns.ctx, diffKeep);
+    notes = [...notes, ...coverageGaps(doc, laneMetrics).map((g) => `not assessed: ${g}`)];
     if (diffKeep !== undefined) notes = [...notes, `diff: ${String(ingested.suppressed)} finding(s) outside the change or already in the baseline were not surfaced`];
   } catch (e) {
     // e.g. the rubric refuses an unmapped (tool, severity): the run must still be closed, as aborted.
@@ -268,7 +270,7 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   }
   const autoConfirmed = applyAutoConfirm(log, rubric, ingested.present);
   // Diff tier (M6): SARIF + the PR summary, hash-linked from run-completed.
-  const outputs = diffKeep === undefined ? [] : writePrOutputs(l, doc, runId, ingested.present, ingested.suppressed);
+  const outputs = diffKeep === undefined ? [] : writePrOutputs(l, doc, runId, ingested.present, ingested.suppressed, coverageGaps(doc, laneMetrics));
   log.append("run-completed", actor, {
     run_id: runId, status, findings_set_hash: ingested.setHash, auto_confirmed: autoConfirmed,
     ...(notes.length > 0 ? { notes } : {}), ...(outputs.length > 0 ? { outputs } : {}),
