@@ -275,6 +275,9 @@ $RADR_HOME (default ~/radr)
 
 ## Development
 
+Conventions, commands and gotchas for contributors (people and AI agents alike) are in
+[AGENTS.md](AGENTS.md).
+
 ```bash
 npm test                                       # unit tests (e2e skipped)
 RADR_HOME=/tmp/radr-tools node bin/radr.js tools install
