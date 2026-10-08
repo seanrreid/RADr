@@ -153,6 +153,16 @@ radr debug show D-0001                      # or: radr debug report D-0001 → d
 - `radr debug suggest D-0001` (LLM policy permitting) proposes hypotheses and experiments,
   labelled `[LLM]`. They're proposals like any other.
 
+**The report follows the engagement type** (`engagement_type` in `engagement.yml`):
+
+| Type | Leads with |
+|---|---|
+| `health-audit` | balanced: scorecard, top risks, findings by category, coverage, licenses |
+| `quality` | maintainability metrics, then quality, maintainability and test findings |
+| `security` | security posture by area, secrets (rotate, history included), known vulnerabilities with CVSS, EPSS and KEV |
+| `due-diligence` | executive summary and key risks, hotspots and ownership (bus factor), license risk (stated even when not assessed), vulnerabilities |
+| `triage` | the one-page verdict |
+
 For a quick **"is this any good?"** verdict, set `engagement_type: triage` and
 `tier: triage` in `engagement.yml`. Triage runs a fixed set of fast static lanes, scans
 secrets at HEAD only, and produces a one-page report.

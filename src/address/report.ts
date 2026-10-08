@@ -82,9 +82,9 @@ function topRisks(inp: RunInputs): string {
   return risky.map((f) => `- **${f.severity.toUpperCase()}** · ${esc(f.message)} (${code(loc(f))}, ${f.id})`).join("\n");
 }
 
-function findingsByCategory(inp: RunInputs): string {
+function findingsByCategory(inp: RunInputs, order: readonly string[] = CATEGORY_ORDER): string {
   const fs = live(inp);
-  const cats = stableSort([...new Set(fs.map((f) => f.category))], (c) => [CATEGORY_ORDER.indexOf(c) === -1 ? 99 : CATEGORY_ORDER.indexOf(c), c]);
+  const cats = stableSort([...new Set(fs.map((f) => f.category))], (c) => [order.indexOf(c) === -1 ? 99 : order.indexOf(c), c]);
   if (cats.length === 0) return "No open findings.";
   return cats.map((c) => {
     const rows = bySeverity(fs.filter((f) => f.category === c)).map((f) => [f.id, f.severity, esc(state(inp, f)), code(`${f.tool}/${f.rule_id}`), code(loc(f)), esc(f.message)]);
@@ -225,35 +225,148 @@ function planSummary(waves: readonly PlanWave[]): string {
   return `${table(["Wave", "Focus", "Work items", "Findings"], rows)}\n\nThe full plan, with effort and acceptance criteria, is in the remediation plan.`;
 }
 
+// --- Report templates per engagement type (PRD §5, §12) ----------------------------------------
+// A template is an ordered list of sections plus the order of finding categories. Sections with
+// nothing to show are left out. health-audit is the balanced default; triage is the one-page
+// verdict; the others put their emphasis first.
+
+type SectionId =
+  | "executive-summary" | "at-a-glance" | "top-risks" | "key-risks" | "findings" | "judgments" | "coverage" | "licenses"
+  | "hygiene" | "remediation" | "recommendations" | "verification" | "methodology" | "appendix"
+  | "security-posture" | "vulnerabilities" | "secrets" | "maintainability" | "hotspots" | "license-risk";
+
+interface Template {
+  readonly sections: readonly SectionId[];
+  readonly categoryOrder: readonly string[];
+}
+
+const BALANCED: Template = {
+  sections: ["executive-summary", "at-a-glance", "top-risks", "findings", "judgments", "coverage", "licenses", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+  categoryOrder: CATEGORY_ORDER,
+};
+
+export const TEMPLATES: Readonly<Record<string, Template>> = {
+  "health-audit": BALANCED,
+  "pr-review": BALANCED,
+  debug: BALANCED,
+  triage: { sections: ["executive-summary", "at-a-glance", "top-risks", "judgments", "verification", "methodology"], categoryOrder: CATEGORY_ORDER },
+  // Code quality: lint, types, complexity, duplication, tests first; security still reported.
+  quality: {
+    sections: ["executive-summary", "at-a-glance", "top-risks", "maintainability", "findings", "judgments", "coverage", "remediation", "recommendations", "licenses", "hygiene", "verification", "methodology", "appendix"],
+    categoryOrder: ["quality", "maintainability", "test", "coverage", "security", "secrets", "dependency", "iac", "license"],
+  },
+  // Security: posture, secrets, and vulnerabilities with CVSS/EPSS/KEV first.
+  security: {
+    sections: ["executive-summary", "security-posture", "top-risks", "secrets", "vulnerabilities", "findings", "judgments", "licenses", "remediation", "recommendations", "at-a-glance", "coverage", "hygiene", "verification", "methodology", "appendix"],
+    categoryOrder: ["secrets", "security", "dependency", "iac", "license", "maintainability", "test", "quality", "coverage"],
+  },
+  // Due diligence: exec-first; risks a buyer weighs (hotspots, bus factor, licenses, CVEs).
+  "due-diligence": {
+    sections: ["executive-summary", "key-risks", "at-a-glance", "hotspots", "license-risk", "vulnerabilities", "maintainability", "findings", "judgments", "coverage", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+    categoryOrder: ["license", "secrets", "dependency", "security", "maintainability", "test", "coverage", "iac", "quality"],
+  },
+};
+
+export function templateFor(engagementType: string): Template {
+  return TEMPLATES[engagementType] ?? BALANCED;
+}
+
+const SECURITY_CATEGORIES = ["secrets", "security", "dependency", "iac", "license"] as const;
+
+function securityPosture(inp: RunInputs): string {
+  const fs = live(inp);
+  const rows = SECURITY_CATEGORIES.map((c) => [CATEGORY_TITLES[c] ?? c, ...[...SEVERITIES].reverse().map((s) => String(fs.filter((f) => f.category === c && f.severity === s).length))]);
+  const kev = fs.filter((f) => f.kev === true).length;
+  const epss = fs.filter((f) => f.epss_bp !== null && f.epss_bp >= 1000).length;
+  return [
+    table(["Area", "Critical", "High", "Medium", "Low", "Info"], rows),
+    "",
+    `Known-exploited (CISA KEV): ${String(kev)}. Likely to be exploited (EPSS 10% or more): ${String(epss)}. Dismissed findings are not counted.`,
+  ].join("\n");
+}
+
+/** EPSS in basis points as a percentage with two decimals, without floats. */
+const epssPct = (bp: number | null): string => (bp === null ? "—" : `${String(Math.floor(bp / 100))}.${String(bp % 100).padStart(2, "0")}%`);
+
+function vulnerabilities(inp: RunInputs): string {
+  const fs = bySeverity(live(inp).filter((f) => f.cve !== null || f.aliases.some((a) => a.startsWith("CVE-"))));
+  if (fs.length === 0) return "No findings with a known CVE.";
+  return table(["ID", "Severity", "CVE", "CVSS", "EPSS", "KEV", "Location"], fs.map((f) => [
+    f.id, f.severity, code(f.cve ?? f.aliases.find((a) => a.startsWith("CVE-")) ?? ""), f.cvss ?? "—", epssPct(f.epss_bp), f.kev === null ? "—" : f.kev ? "yes" : "no", code(loc(f)),
+  ]));
+}
+
+function secretsSection(inp: RunInputs): string {
+  const fs = bySeverity(live(inp).filter((f) => f.category === "secrets"));
+  if (fs.length === 0) return inp.lanesRun.has("secrets") ? "No secrets found." : "The secrets lane did not run.";
+  return [
+    "Every credential found must be rotated, including those that exist only in the history: anyone with a clone of the repository has them.",
+    "",
+    table(["ID", "Severity", "Rule", "Location", "Where"], fs.map((f) => [f.id, f.severity, code(`${f.tool}/${f.rule_id}`), code(loc(f)), f.tags.includes("history-only") ? "history only" : "at the reviewed commit"])),
+  ].join("\n");
+}
+
+function maintainability(inp: RunInputs): string | null {
+  const m = inp.metrics["maint"];
+  if (m === undefined) return null;
+  const n = (k: string): string => (typeof m[k] === "number" ? String(m[k]) : "—");
+  const complex = live(inp).filter((f) => f.tool === "lizard").length;
+  return [
+    table(["Measure", "Value"], [
+      ["Functions analyzed", n("functions")], ["Complex functions", n("complex_functions")], ["Complex functions (%)", n("complex_functions_pct")],
+      ["Duplicated lines (%)", n("duplication_pct")], ["Duplicated blocks", n("clones")],
+    ]),
+    "",
+    `${String(complex)} function(s) are complex enough to be findings (cyclomatic complexity over 15). Duplication is a metric, not a finding per block.`,
+  ].join("\n");
+}
+
+function hotspots(inp: RunInputs): string | null {
+  const h = inp.metrics["history"];
+  if (h === undefined) return null;
+  const n = (k: string): string => (typeof h[k] === "number" ? String(h[k]) : "—");
+  const window = h["window"] as { commits?: number } | undefined;
+  const spots = (Array.isArray(h["hotspots"]) ? h["hotspots"] : []) as { file: string; churn: number; complexity: number }[];
+  return [
+    table(["Measure", "Value"], [
+      ["Authors", n("authors")], ["Bus factor (fewest authors covering half the commits)", n("bus_factor")],
+      ["Commits in the window", window?.commits === undefined ? "—" : String(window.commits)], ["Churn in the most complex files (%)", n("churn_hotspot_pct")],
+    ]),
+    ...(spots.length === 0 ? [] : ["", "**Hotspots** (frequently changed and complex: where defects and cost concentrate)", "",
+      table(["File", "Churn (lines)", "Complexity"], spots.slice(0, TOP_RISKS).map((x) => [code(x.file), String(x.churn), String(x.complexity)]))]),
+  ].join("\n");
+}
+
 export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefined, waves: readonly PlanWave[], runDate: string): string {
-  const triage = inp.doc.engagement_type === "triage";
-  const parts = [
-    frontMatter(inp, l, card, runDate),
-    "",
-    "# Executive summary",
-    "",
-    keep("executive-summary", KEEP_DEFAULTS["executive-summary"]),
-  ];
-  if (card !== undefined) parts.push("", "# At a glance", "", scorecardSection(card));
-  parts.push("", "# Top risks", "", topRisks(inp));
-  const judged = judgmentSection(inp);
-  if (!triage) {
-    parts.push("", "# Findings", "", findingsByCategory(inp));
-    if (judged !== null) parts.push("", "# Judgment findings", "", judged);
-    const cov = coverageSection(inp);
-    if (cov !== null) parts.push("", "# Test coverage", "", cov);
-    const lic = licenseSection(inp);
-    if (lic !== null) parts.push("", "# Licenses", "", lic);
-    const hyg = hygieneSection(inp);
-    if (hyg !== null) parts.push("", "# Repository hygiene", "", hyg);
-    parts.push("", "# Remediation overview", "", planSummary(waves));
-    parts.push("", "# Recommendations", "", keep("recommendations", KEEP_DEFAULTS.recommendations));
+  const t = templateFor(inp.doc.engagement_type);
+  const render: Record<SectionId, () => [string, string | null]> = {
+    "executive-summary": () => ["Executive summary", keep("executive-summary", KEEP_DEFAULTS["executive-summary"])],
+    "at-a-glance": () => ["At a glance", card === undefined ? null : scorecardSection(card)],
+    "top-risks": () => ["Top risks", topRisks(inp)],
+    "key-risks": () => ["Key risks", topRisks(inp)],
+    findings: () => ["Findings", findingsByCategory(inp, t.categoryOrder)],
+    judgments: () => ["Judgment findings", judgmentSection(inp)],
+    coverage: () => ["Test coverage", coverageSection(inp)],
+    licenses: () => ["Licenses", licenseSection(inp)],
+    hygiene: () => ["Repository hygiene", hygieneSection(inp)],
+    remediation: () => ["Remediation overview", planSummary(waves)],
+    recommendations: () => ["Recommendations", keep("recommendations", KEEP_DEFAULTS.recommendations)],
+    verification: () => ["Verification", verificationSection(inp, l)],
+    methodology: () => ["Methodology", methodology(inp, l)],
+    appendix: () => ["Appendix: all findings", appendix(inp)],
+    "security-posture": () => ["Security posture", securityPosture(inp)],
+    vulnerabilities: () => ["Known vulnerabilities", vulnerabilities(inp)],
+    secrets: () => ["Secrets", secretsSection(inp)],
+    maintainability: () => ["Maintainability", maintainability(inp)],
+    hotspots: () => ["Hotspots and ownership", hotspots(inp)],
+    // Due diligence: license risk is a deal term, so its absence is stated, never silent.
+    "license-risk": () => ["License risk", licenseSection(inp) ?? "License compliance was not assessed in this run: the license lane runs only in container mode (`network: { mode: offline, enforcement: container }`). Treat license risk as unknown."],
+  };
+  const parts = [frontMatter(inp, l, card, runDate)];
+  for (const id of t.sections) {
+    const [heading, body] = render[id]();
+    if (body !== null) parts.push("", `# ${heading}`, "", body);
   }
-  if (triage && judged !== null) parts.push("", "# Judgment findings", "", judged);
-  const verified = verificationSection(inp, l);
-  if (verified !== null) parts.push("", "# Verification", "", verified);
-  parts.push("", "# Methodology", "", methodology(inp, l));
-  if (!triage) parts.push("", "# Appendix: all findings", "", appendix(inp));
   return `${parts.join("\n")}\n`;
 }
 
