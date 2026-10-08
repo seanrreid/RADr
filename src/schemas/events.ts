@@ -24,6 +24,8 @@ const runId = { type: "string", pattern: "^R-[0-9]{4}$" } as const;
 const laneId = { type: "string", pattern: SLUG } as const;
 const FINDING_ID = "^[FJ]-[0-9]{4,}$";
 const SEVERITY_ENUM = ["info", "low", "medium", "high", "critical"];
+const DEBUG_ID = { type: "string", pattern: "^D-[0-9]{4,}$" } as const;
+const HYPOTHESIS_ID = { type: "string", pattern: "^H-[0-9]{4,}$" } as const;
 const obj = (properties: Record<string, unknown>, required: string[] = Object.keys(properties)): AnySchema => ({
   type: "object",
   additionalProperties: false,
@@ -93,6 +95,49 @@ const PAYLOADS = {
   ),
   // finding_id: F- (tool findings); J- (judgment findings) since M4. Widening a pattern is
   // additive: every older event still validates.
+  // --- M5: Debug (PRD §11). One debug is D-NNNN; its runs DR-NNNN; its hypotheses H-NNNN. ---
+  "debug-opened": obj(
+    {
+      debug_id: DEBUG_ID, from: { enum: ["issue", "finding"] }, finding_id: { type: "string", pattern: FINDING_ID },
+      symptom: str, expected: str, actual: str, environment: str, first_seen: str, commit: { type: "string", pattern: GIT_SHA },
+    },
+    ["debug_id", "from", "symptom", "commit"],
+  ),
+  // A sandbox run of the debug's own scripts: the repro, an experiment, a bisect step, or a
+  // regression-guard run. outcome follows the git-bisect-run contract (see src/debug/state.ts).
+  "debug-run": obj(
+    {
+      debug_id: DEBUG_ID, run_id: { type: "string", pattern: "^DR-[0-9]{4,}$" },
+      kind: { enum: ["repro", "experiment", "bisect", "guard-without-fix", "guard-with-fix"] },
+      commit: { type: "string", pattern: GIT_SHA }, script_hash: sha, exit_code: { type: ["integer", "null"] },
+      outcome: { enum: ["present", "absent", "skip", "error"] }, log_ref: str, log_hash: sha,
+      hypothesis_id: HYPOTHESIS_ID, detail: { type: "string" },
+    },
+    ["debug_id", "run_id", "kind", "commit", "script_hash", "exit_code", "outcome", "log_ref", "log_hash"],
+  ),
+  "debug-bisected": obj(
+    {
+      debug_id: DEBUG_ID, good: { type: "string", pattern: GIT_SHA }, bad: { type: "string", pattern: GIT_SHA },
+      // The first bad commit, or the candidates it must be one of when commits were skipped.
+      first_bad: { type: "array", minItems: 1, items: { type: "string", pattern: GIT_SHA } },
+      runs: { type: "array", items: { type: "string", pattern: "^DR-[0-9]{4,}$" } },
+    },
+  ),
+  "hypothesis-proposed": obj(
+    { debug_id: DEBUG_ID, hypothesis_id: HYPOTHESIS_ID, text: str, source: { enum: ["consultant", "llm"] }, call_id: { type: "string", pattern: "^L-[0-9]{4,}$" } },
+    ["debug_id", "hypothesis_id", "text", "source"],
+  ),
+  "hypothesis-decided": obj({
+    debug_id: DEBUG_ID, hypothesis_id: HYPOTHESIS_ID, to: { enum: ["confirmed", "refuted"] },
+    run_id: { type: "string", pattern: "^DR-[0-9]{4,}$" }, reason: str,
+  }),
+  "debug-concluded": obj(
+    {
+      debug_id: DEBUG_ID, outcome: { enum: ["root-caused", "cannot-reproduce"] }, hypothesis_id: HYPOTHESIS_ID,
+      introducing_commit: { type: "string", pattern: GIT_SHA }, summary: str,
+    },
+    ["debug_id", "outcome", "summary"],
+  ),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: FINDING_ID }, from: str, to: str, reason: { type: "string" } },
     ["finding_id", "from", "to"],

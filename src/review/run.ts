@@ -161,6 +161,7 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const gates = Gates.load();
   const matrix = Matrix.load();
   const { doc, fingerprint } = await assertScope(l, gates, log);
+  if (doc.lanes.length === 0) throw new RefusedError(`${l.id} has no lanes (a standalone debug engagement): use \`radr debug\``);
   const rubric = loadRubric(doc.rubric);
 
   const lock = readLock(l.toolchainLock);

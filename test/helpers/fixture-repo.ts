@@ -315,3 +315,32 @@ export async function makeStackSandboxRepo(dir: string): Promise<FixtureRepo> {
   await g(dir, ["commit", "-q", "-m", "stack sandbox fixture"], "2026-01-01T10:00:00Z");
   return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-01-01T10:00:00Z")] };
 }
+
+/**
+ * Debug fixture (M5): a dependency-free Node project with 20 commits. Commit 13 (index 12)
+ * plants a regression in add(); every other commit only touches CHANGELOG.md. Fixed dates
+ * and identities make the SHAs identical everywhere, so bisect results can be asserted.
+ */
+export const REGRESSION_COMMITS = 20;
+export const REGRESSION_BAD_INDEX = 12;
+/** The repro: exit 0 when add(2, 2) is 4 (bug absent), 1 when it isn't (bug present). */
+export const REGRESSION_REPRO = `#!/bin/sh\nnode -e "process.exit(require('./src/math.js').add(2, 2) === 4 ? 0 : 1)"\n`;
+
+export async function makeRegressionRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-02-01T00:00:00Z");
+  write(dir, "package.json", `{\n  "name": "calc",\n  "version": "1.0.0",\n  "private": true,\n  "scripts": { "test": "node --test" }\n}\n`);
+  write(dir, "package-lock.json", `{\n  "name": "calc",\n  "version": "1.0.0",\n  "lockfileVersion": 3,\n  "requires": true,\n  "packages": {\n    "": { "name": "calc", "version": "1.0.0" }\n  }\n}\n`);
+  write(dir, "test/math.test.js", `const { test } = require("node:test");\nconst assert = require("node:assert");\nconst { mul } = require("../src/math.js");\ntest("mul", () => assert.equal(mul(2, 3), 6));\n`);
+  const commits: string[] = [];
+  for (let i = 0; i < REGRESSION_COMMITS; i++) {
+    const add = i >= REGRESSION_BAD_INDEX ? "(a, b) => a + b + (a === b ? 1 : 0)" : "(a, b) => a + b";
+    write(dir, "src/math.js", `const add = ${add};\nconst mul = (a, b) => a * b;\nmodule.exports = { add, mul };\n`);
+    write(dir, "CHANGELOG.md", Array.from({ length: i + 1 }, (_, k) => `- change ${String(k + 1)}`).join("\n") + "\n");
+    const day = String(i + 1).padStart(2, "0");
+    await g(dir, ["add", "-A"], `2026-02-${day}T00:00:00Z`);
+    await g(dir, ["commit", "-q", "-m", i === REGRESSION_BAD_INDEX ? "speed up add" : `change ${String(i + 1)}`], `2026-02-${day}T10:00:00Z`);
+    commits.push(await g(dir, ["rev-parse", "HEAD"], `2026-02-${day}T10:00:00Z`));
+  }
+  return { dir, commits };
+}

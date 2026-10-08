@@ -73,7 +73,8 @@ const validate = makeValidator<EngagementDoc>(
         properties: { include: { ...strArray, minItems: 1 }, exclude: strArray },
       },
       stacks: { type: "array", items: { enum: STACKS }, uniqueItems: true },
-      lanes: { type: "array", items: { enum: LANES }, uniqueItems: true, minItems: 1 },
+      // Empty only for a standalone debug engagement (checked in parseEngagement).
+      lanes: { type: "array", items: { enum: LANES }, uniqueItems: true },
       rubric: { type: "string", pattern: "^v[0-9]+$" },
       network: {
         type: "object",
@@ -94,6 +95,7 @@ const validate = makeValidator<EngagementDoc>(
 
 export function parseEngagement(text: string, source: string): EngagementDoc {
   const doc = validate(parseYaml(text, source), source);
+  if (doc.lanes.length === 0 && doc.engagement_type !== "debug") throw new UsageError(`${source}: /lanes must NOT have fewer than 1 items (only a debug engagement may have no lanes)`);
   if (doc.tier === "triage") {
     const same = doc.lanes.length === TRIAGE_LANES.length && TRIAGE_LANES.every((x) => doc.lanes.includes(x));
     if (!same) throw new UsageError(`${source}: the triage tier runs a fixed lane set: [${TRIAGE_LANES.join(", ")}]`);

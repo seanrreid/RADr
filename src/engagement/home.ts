@@ -34,6 +34,8 @@ export interface Layout {
   readonly llm: string;
   /** Judgment findings proposed by the LLM lane (M4). */
   readonly judgments: string;
+  /** Debug records (M5): debug/<D-id>/. */
+  readonly debug: string;
 }
 
 export function layout(home: string, id: string): Layout {
@@ -55,6 +57,7 @@ export function layout(home: string, id: string): Layout {
     artifacts: path.join(dir, "artifacts"),
     llm: path.join(dir, "llm"),
     judgments: path.join(dir, "judgments.jsonl"),
+    debug: path.join(dir, "debug"),
   };
 }
 
