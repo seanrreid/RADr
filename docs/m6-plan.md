@@ -1,6 +1,6 @@
 # M6 Plan: PR review (`diff` tier) and `radr verify`
 
-**Status:** approved 2026-10-08; built after M5
+**Status:** complete (as built below)
 **Source:** [PRD.md](../PRD.md) §13 (diff tier), §8 (disposition state machine, baseline),
 §12 (remediation plan acceptance), §19 (M6)
 **Builds on:** [M4](m4-plan.md) (as built)
@@ -102,3 +102,51 @@
   manifests (AC7, AC9).
 - **W4: Outputs:** the SARIF writer plus schema validation, and the Markdown summary (AC8).
 - **W5: E2E, docs, and as-built.**
+
+## As built (2026-10-08)
+
+### Acceptance criteria
+
+| AC | Status | Evidence |
+|---|---|---|
+| AC1 verify refuses a scope that changed beyond the commit | ✅ | every review writes `raw/<run>/scope.json` (hash in `run-started`); verify compares it with the current scope, ignoring only the commit and the dependency snapshot, and refuses the same commit and pre-M6 runs |
+| AC2 fixed / verified / still present / regressed | ✅ | four-commit fixture with a commit-dependent fake ruff; real-tool e2e (real ruff) |
+| AC3 a partial lane can't verify | ✅ | the "break lint" commit: absent findings stay `fixed` |
+| AC4 judgment findings close by hand | ✅ | `radr disposition J-… fixed --reason` (J- only); verify lists confirmed judgments |
+| AC5 Verification in the report | ✅ (adjusted) | a Verification section (counts plus every finding verify moved) and a summary line on the plan; see below |
+| AC6 baseline, pinned in the fingerprint | ✅ | `radr baseline set`, `baseline-set` event, `diff.baseline` hash in `engagement.yml`; an edited baseline refuses the run |
+| AC7 only new findings in changed files | ✅ | diff fixture: the untouched file's finding and the baselined one are suppressed (counted in a run note) |
+| AC8 SARIF 2.1.0, byte-identical | ✅ | validated against a structural SARIF 2.1.0 schema; identical across two homes with different `TZ`/`LANG` (real-tool e2e) |
+| AC9 secrets over base..head | ✅ | gitleaks gets `--log-opts=<base>..<head>` in a diff scope |
+
+### Decisions made while building
+
+- **AC5 adjusted:** a verify run's report contains only the findings present at the fixed
+  commit, so its remediation plan already holds only what's still open, and fixed work drops
+  out of it. Instead of per-item status badges, the report's Verification section lists what
+  closed, what was verified and what regressed, and the plan opens with a one-line summary.
+- **Verify writes dispositions through the same transition table** as a person
+  (`canTransition`), with actor `verify@<run>`. Confirmed + absent becomes two events
+  (`fixed`, then `verified`) when the lane ran clean.
+- **No-snippet findings:** an absent one whose tool/rule/file/message twin appears as a new
+  finding is listed for a manual check, not marked fixed.
+- **The baseline holds every finding of its run**, whatever its state, so a dismissed false
+  positive stays suppressed in PR reviews.
+- **Fingerprints are computed before the diff filter**, so occurrence numbering (two copies
+  of the same mistake) doesn't depend on what the filter keeps.
+- **Secrets in a diff scope** come from the PR's commits and surface even if the file has
+  changed again since. A secret added and removed within a PR still leaked.
+- **The SARIF schema check is a structural subset** of SARIF 2.1.0 covering what radr writes;
+  the full OASIS schema isn't vendored (it would need its own license review). GitHub's
+  upload is the final check.
+- **Scope snapshots** live in `src/review/scope-snapshot.ts` so the baseline and verify
+  modules don't import the review runner's internals.
+
+### Open items carried forward
+
+- A `radr pr fetch <n>` convenience that prepares a PR scope up to the approval.
+- Per-tool file targeting for the diff tier, if reviews of large repos get slow.
+- Coverage in the diff tier (opt-in per PRD §14.1a) isn't specialised: if the coverage lane is
+  enabled, it runs as in any review and its findings are filtered like the rest.
+- Uploading SARIF (to GitHub code scanning) and posting the comment stay manual.
+

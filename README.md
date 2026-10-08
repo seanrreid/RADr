@@ -15,9 +15,9 @@ what needs hands-on work.
   timezone, or locale.
 
 See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
-[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md), [M5](docs/m5-plan.md).
+[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md), [M5](docs/m5-plan.md), [M6](docs/m6-plan.md).
 
-**Status: M5.** Read, Address and Debug work for **TS/JS, Python, Go, Rust,
+**Status: M6 (v1 complete).** Read, Address and Debug work for **TS/JS, Python, Go, Rust,
 JVM (Java/Kotlin), PHP, Ruby, and .NET**:
 
 - the deterministic core
@@ -37,8 +37,10 @@ JVM (Java/Kotlin), PHP, Ruby, and .NET**:
   blocks. The model never sets severity or makes a decision.
 - **Debug:** a root-cause workflow for one bug. Reproduce in the sandbox, bisect, test
   hypotheses with recorded experiments, conclude (gated), and deliver a regression test.
-
-Still to come: PR review and `radr verify` (M6).
+- **`radr verify`:** re-run at the client's fixed commit; findings become fixed, verified or
+  regressed.
+- **PR review (`diff` tier):** only new findings in the files a pull request changes, as
+  SARIF 2.1.0 and a Markdown comment.
 
 ## Requirements
 
@@ -91,6 +93,36 @@ radr address --draft                        # optional: LLM drafts of untouched 
 radr approve report                         # Gate 2 (or --accept-partial "<reason>")
 radr render                                 # report.pdf + remediation.pdf
 ```
+
+## Verify and PR review
+
+**Verify** re-runs the same scope at the client's fixed commit. Everything except the commit
+(and the dependency cache) must match the run you verify against, or radr refuses.
+
+```bash
+radr source fetch                           # pull the client's new commits into radr's mirror
+radr scope --rev <fixed-sha> && radr approve scope
+radr verify --against R-0001                # confirmed + absent → fixed → verified (lane ran clean)
+radr address                                # the report gains a Verification section
+```
+
+A finding that's absent goes to `fixed`, and to `verified` when its lane ran clean (a partial
+lane can't vouch for absence). A fixed finding that comes back is `regressed`. Judgment
+findings can't be re-checked by a tool: close one with `radr disposition J-0001 fixed
+--reason "…"`.
+
+**PR review** (`tier: diff`) reports only what a pull request adds:
+
+```bash
+radr baseline set --from R-0001             # what's already known: never re-reported
+radr source fetch
+radr scope --rev <pr-head> --base <target-branch> && radr approve scope   # Gate 1, per PR
+radr review                                 # → review/pr-<head>.sarif and review/pr-<head>.md
+```
+
+A finding surfaces only if its file changed in `base...head` and it isn't in the baseline.
+Secrets are scanned over the PR's own commits. The SARIF uploads to code scanning; the
+Markdown is the comment to post.
 
 ## Debug
 
@@ -196,6 +228,8 @@ marked partial (`policy/matrix.yml`, row `llm`).
 | Severity is never guessed | The rubric maps every (tool, severity) pair explicitly. Unmapped pairs refuse. |
 | Same scope, same findings | The findings-set hash is identical across homes, `TZ`, and `LANG` (tested end to end). |
 | Debug conclusions rest on evidence | Every repro, bisect step, experiment and guard run is a sandbox run whose script, log and exit code are hashed into the event log. Root cause needs a reproducing run and a confirmed hypothesis (invariant 7). |
+| "Fixed" means a re-run says so | `radr verify` runs the same scope at the fixed commit and marks only what's absent; `verified` needs the lane to have run clean. Everything verify moves is an event by `verify@<run>`. |
+| A PR review shows only what the PR adds | Suppression is against a hash-pinned baseline of fingerprints; the SARIF and summary are byte-identical across machines, `TZ` and `LANG` (tested end to end). |
 | The LLM proposes, people decide | Under policy `off` the agent is never spawned. Agent output can't set a severity, a disposition, or a gate (ESLint boundary + an adversarial eval). Judgment findings are kept apart from tool findings, so they never change the findings-set hash. |
 | You can audit what left the machine | Every prompt and response is stored in `llm/`, hash-linked from an `llm-call` event. A `metadata-only` prompt quotes no client code (checked against the whole repo in tests). |
 

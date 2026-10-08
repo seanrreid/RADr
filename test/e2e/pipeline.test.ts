@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { FAKE_AWS_KEY_ID, POLYGLOT, makeFixtureRepo, makePolyglotFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { FAKE_AWS_KEY_ID, POLYGLOT, makeDiffRepo, makeFixtureRepo, makePolyglotFixtureRepo, makeVerifyRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { promptFreeText } from "../../src/llm/prompt.js";
 import { leakedRuns } from "../../src/llm/redact.js";
 import { tmpDir } from "../helpers/tmp.js";
@@ -185,6 +185,53 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
         if (policy === "metadata-only") assert.deepEqual(leakedRuns(promptFreeText(p), worktree), [], "metadata-only prompt quotes the repository");
       }
     }
+  });
+
+  it("M6: verify marks fixed findings verified, and a PR review surfaces only new ones, byte-identically across TZ/LANG", async () => {
+    // verify: real ruff flags each `import unused_…`; the fix commit removes two of three.
+    const vrepo = await makeVerifyRepo(path.join(fixtureRoot, "verify"));
+    const env: Env = { TZ: "UTC", LANG: "C" };
+    const home = await freshHome(env);
+    const step = async (h: string, e: Env, ...args: string[]) => {
+      const r = await radr(h, e, ...args, "-e", "acme-e2e");
+      assert.equal(r.code, 0, `radr ${args.join(" ")}:\n${r.out}\n${r.err}`);
+      return r.out;
+    };
+    assert.equal((await radr(home, env, "init", "acme", "e2e")).code, 0);
+    await step(home, env, "scope", "--source", vrepo.dir, "--rev", vrepo.commits[0] ?? "");
+    await step(home, env, "approve", "scope");
+    await step(home, env, "review");
+    const lint = (await radr(home, env, "findings", "-e", "acme-e2e", "--json", "--lane", "lint")).out.trim().split("\n").map((l) => JSON.parse(l) as { id: string; file: string; state: string });
+    assert.deepEqual(lint.map((f) => f.file).sort(), ["app/a.py", "app/b.py", "app/c.py"]);
+    // Low-severity lint is auto-confirmed by the rubric; confirm anything still pending.
+    for (const f of lint.filter((x) => x.state === "pending")) await step(home, env, "disposition", f.id, "confirmed");
+    await step(home, env, "scope", "--rev", vrepo.commits[1] ?? "");
+    await step(home, env, "approve", "scope");
+    const v = await step(home, env, "verify", "--against", "R-0001");
+    assert.match(v, /verified 2/);
+    assert.match(v, /still present 1/);
+
+    // PR review: two homes, different TZ/LANG, same bytes.
+    const drepo = await makeDiffRepo(path.join(fixtureRoot, "diff"));
+    const outputs = async (e: Env) => {
+      const h = await freshHome(e);
+      assert.equal((await radr(h, e, "init", "acme", "e2e")).code, 0);
+      await step(h, e, "scope", "--source", drepo.dir, "--rev", drepo.commits[0] ?? "");
+      await step(h, e, "approve", "scope");
+      await step(h, e, "review");
+      await step(h, e, "baseline", "set", "--from", "R-0001");
+      await step(h, e, "scope", "--rev", drepo.commits[1] ?? "", "--base", drepo.commits[0] ?? "");
+      await step(h, e, "approve", "scope");
+      await step(h, e, "review");
+      const stem = path.join(h, "engagements", "acme-e2e", "review", `pr-${(drepo.commits[1] ?? "").slice(0, 12)}`);
+      return { sarif: readFileSync(`${stem}.sarif`, "utf8"), md: readFileSync(`${stem}.md`, "utf8") };
+    };
+    const a = await outputs({ TZ: "UTC", LANG: "C" });
+    const b = await outputs({ TZ: "Asia/Kolkata", LANG: "de_DE.UTF-8" });
+    assert.equal(a.sarif, b.sarif);
+    assert.equal(a.md, b.md);
+    const results = (JSON.parse(a.sarif) as { runs: { results: { ruleId: string; locations: { physicalLocation: { artifactLocation: { uri: string } } }[] }[] }[] }).runs[0]?.results ?? [];
+    assert.deepEqual(results.map((r) => [r.ruleId, r.locations[0]?.physicalLocation.artifactLocation.uri]), [["ruff/F401", "app/d.py"]]);
   });
 
   it("M3: every new stack is detected, and sca and sast find its planted signals (AC11)", async () => {

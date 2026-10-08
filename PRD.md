@@ -728,7 +728,7 @@ debug hypothesis proposal — each of which only runs through `RADR_AGENT_CMD`.
 | **M3** ✅ ([as built](docs/m3-plan.md#as-built-2026-10-07)) | Container image, remaining lanes (`sast`, `maint`, `history`, `license`, `iac`, `hygiene`), Go/Rust/JVM/PHP/Ruby/.NET packs **including their build recipes**; coverage % for Go (Rust/JVM/PHP/Ruby/.NET run tests for pass/fail + stability; their coverage tools need per-project build config, deferred) |
 | **M4** ✅ ([as built](docs/m4-plan.md#as-built-2026-10-07)) | LLM lane (`triage`, drafting, judgment findings) with policy enforcement + evals; rubric v2 (judgment entry) |
 | **M5** ✅ ([as built](docs/m5-plan.md#as-built-2026-10-08)) | Debug workflow (reuses the M2 sandbox for repro; radr-driven bisect instead of `git bisect run`) |
-| **M6** | `diff` tier (consultant-side, against a fork; §13), `verify` |
+| **M6** ✅ ([as built](docs/m6-plan.md#as-built-2026-10-08)) | `diff` tier (consultant-side, against a fork; §13), `verify` |
 
 ---
 
