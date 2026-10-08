@@ -16,6 +16,7 @@ import { EventLog } from "../../src/state/events.js";
 import { cliRunner } from "../helpers/cli.js";
 import { seedHome, setFakeTool } from "../helpers/fake-toolchain.js";
 import { makeFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { writeProse } from "../helpers/prose.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 describe("markdown safety", () => {
@@ -112,6 +113,12 @@ describe("radr address + approve report (AC10, AC11)", () => {
 
     writeFileSync(p.report, readFileSync(p.report, "utf8").replace("_Write the executive summary here. radr preserves this block when the report is regenerated._", "Two critical issues; both fixable this week."));
     await radr("address", "-e", "acme-audit");
+    // The other prose blocks are still the template's placeholders: never shipped to a client.
+    const placeholder = await radr("approve", "report", "-e", "acme-audit");
+    assert.equal(placeholder.code, 1);
+    assert.match(placeholder.err, /placeholder text: recommendations \(report\.md\), plan-notes \(remediation\.md\)/);
+    writeProse(l.dir);
+    await radr("address", "-e", "acme-audit");
     const regenerated = readFileSync(p.report, "utf8");
     assert.match(regenerated, /Two critical issues; both fixable this week\./, "consultant prose survives regeneration");
     await radr("address", "-e", "acme-audit");
@@ -137,6 +144,8 @@ describe("radr address + approve report (AC10, AC11)", () => {
   it("refuses a partial run unless the gap is explicitly accepted (and records why)", async () => {
     const { radr, l } = await reviewed({ failRuff: true });
     await radr("disposition", "F-0001", "confirmed", "-e", "acme-audit");
+    await radr("address", "-e", "acme-audit");
+    writeProse(l.dir);
     await radr("address", "-e", "acme-audit");
     const r = await radr("approve", "report", "-e", "acme-audit");
     assert.equal(r.code, 1);

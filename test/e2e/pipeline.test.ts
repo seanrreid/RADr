@@ -16,6 +16,7 @@ import { run } from "../../src/core/exec.js";
 import { FAKE_AWS_KEY_ID, POLYGLOT, makeDiffRepo, makeFixtureRepo, makePolyglotFixtureRepo, makeVerifyRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { promptFreeText } from "../../src/llm/prompt.js";
 import { leakedRuns } from "../../src/llm/redact.js";
+import { writeProse } from "../helpers/prose.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const TOOLS_HOME = process.env["RADR_E2E_TOOLS"];
@@ -141,6 +142,8 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     await ok("address", "-e", "acme-e2e");
     const report = readFileSync(path.join(home, "engagements", "acme-e2e", "report", "report.md"), "utf8");
     assert.match(report, /# Top risks/);
+    writeProse(path.join(home, "engagements", "acme-e2e"));
+    await ok("address", "-e", "acme-e2e");
     await ok("approve", "report", "-e", "acme-e2e");
     const first = await ok("render", "-e", "acme-e2e");
     const pdf = path.join(home, "engagements", "acme-e2e", "report", "report.pdf");

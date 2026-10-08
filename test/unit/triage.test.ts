@@ -15,6 +15,7 @@ import { EventLog } from "../../src/state/events.js";
 import { cliRunner } from "../helpers/cli.js";
 import { seedHome, setFakeTool } from "../helpers/fake-toolchain.js";
 import { makeFixtureRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { writeProse } from "../helpers/prose.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const fakeAgent = path.join(path.dirname(fileURLToPath(import.meta.url)), "../helpers/fake-agent.js");
@@ -140,6 +141,8 @@ describe("radr triage", () => {
     assert.match((await t.radr("findings", "-e", "acme-audit")).out, /J-0001 {2}high {5}pending/);
 
     await t.radr("disposition", "J-0001", "confirmed", "-e", "acme-audit");
+    await t.radr("address", "-e", "acme-audit");
+    writeProse(t.l.dir);
     await t.radr("address", "-e", "acme-audit");
     const ok = await t.radr("approve", "report", "-e", "acme-audit");
     assert.equal(ok.code, 0, ok.err);

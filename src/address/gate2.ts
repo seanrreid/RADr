@@ -17,7 +17,8 @@ import { treeHash } from "../sandbox/deps.js";
 import { EventLog } from "../state/events.js";
 import { Gates } from "../state/gates.js";
 import { dispositionsHash, loadRunInputs, type RunInputs } from "./inputs.js";
-import { addressPaths } from "./report.js";
+import { extractKeeps } from "./markdown.js";
+import { KEEP_DEFAULTS, addressPaths } from "./report.js";
 
 export const DEFAULT_THEME = "torchcodelab";
 const SHOW_IDS = 10;
@@ -60,6 +61,15 @@ function lastActors(inp: RunInputs): Map<string, string> {
   return out;
 }
 
+/** Keep-blocks (report and plan) whose body is still the template's default text. */
+export function placeholderBlocks(l: Layout): string[] {
+  const p = addressPaths(l);
+  return [[p.report, "report.md"], [p.remediation, "remediation.md"]].flatMap(([file = "", name]) => {
+    const keeps = extractKeeps(readFileSync(file, "utf8"));
+    return Object.entries(KEEP_DEFAULTS).filter(([id, body]) => keeps.get(id)?.trim() === body).map(([id]) => `${id} (${String(name)})`);
+  });
+}
+
 export function approveReport(l: Layout, actor: string, clock: Clock, acceptPartial?: string): { runId: string; hashes: Record<string, string> } {
   const inp = loadRunInputs(l, clock);
   if (inp.runStatus === "aborted") throw new RefusedError(`run ${inp.runId} was aborted; there is nothing to sign off`);
@@ -100,6 +110,12 @@ export function approveReport(l: Layout, actor: string, clock: Clock, acceptPart
     throw new RefusedError(`run ${inp.runId} is partial (${partialLanes.join(", ")}); re-run, or sign off with --accept-partial "<reason>" (printed on the report cover)`);
   }
 
+  // Placeholder prose must never reach a client; checked last: decide the findings, then write (dogfood 2026-10-08: a signed PDF said "Write the
+  // executive summary here"). Any text will do, even "None.", but not the template's.
+  const placeholders = placeholderBlocks(l);
+  if (placeholders.length > 0) {
+    throw new RefusedError(`still the template's placeholder text: ${placeholders.join(", ")}; write them (or replace them with "None."), then run \`radr address\``);
+  }
   new EventLog(l.events, clock).append("report-approved", actor, {
     ...hashes,
     ...(inp.runStatus === "partial" && acceptPartial !== undefined ? { accepted_partial: acceptPartial } : {}),
