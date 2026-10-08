@@ -5,7 +5,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { resolveActor } from "../../core/actor.js";
 import { RefusedError, UsageError } from "../../core/errors.js";
+import { bisect } from "../../debug/bisect.js";
 import { debugSandbox, runDebugScript, scriptHash } from "../../debug/sandbox.js";
+import { gitOut } from "../../engagement/git.js";
 import { assertOpen, getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
 import { radrHome, resolveEngagement, type Layout } from "../../engagement/home.js";
 import { readJudgments } from "../../findings/judgments.js";
@@ -16,7 +18,7 @@ import { Gates } from "../../state/gates.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CliContext, CommandSpec } from "../context.js";
 
-const SUBCOMMANDS = ["open", "list", "show", "repro"] as const;
+const SUBCOMMANDS = ["open", "list", "show", "repro", "bisect"] as const;
 
 /** debug/<id>/ and its evidence folders. */
 export function debugDir(l: Layout, id: string): { root: string; repro: string; experiments: string; guard: string; runs: string } {
@@ -76,6 +78,26 @@ async function repro(args: readonly string[], ctx: CliContext): Promise<void> {
   ctx.out(`  log: ${r.logRef}`);
 }
 
+async function bisectCmd(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, good: { type: "string" }, stack: { type: "string" } }, 1);
+  if (values.good === undefined) throw new UsageError("bisect needs --good <rev>: a commit where the bug is absent");
+  const home = radrHome(ctx.env);
+  const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const { doc } = await assertScope(l, Gates.load(), log);
+  const d = getDebug(log.read(), positionals[0] ?? "");
+  const sb = await debugSandbox(home, l, doc, ctx.env, snapshotsFor(home, l).depsCache, values.stack);
+  const r = await bisect(l, log, await resolveActor(ctx.env), sb, d, values.good, path.join(debugDir(l, d.id).repro, "repro.sh"));
+  ctx.out(`bisect ${d.id}: ${String(r.runs.length)} sandbox run(s) between ${r.good.slice(0, 12)} (good) and ${r.bad.slice(0, 12)} (bad)`);
+  if (r.firstBad.length === 1) {
+    const sha = r.firstBad[0] ?? "";
+    ctx.out(`  first bad commit: ${sha} ${await gitOut(["log", "-1", "--format=%s", sha], l.mirror)}`);
+  } else {
+    ctx.out(`  some commits couldn't be tested (skipped); the first bad commit is one of:`);
+    for (const sha of r.firstBad) ctx.out(`    ${sha}`);
+  }
+}
+
 function list(args: readonly string[], ctx: CliContext): void {
   const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
   const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
@@ -125,6 +147,7 @@ export const debug: CommandSpec = {
         show(rest, ctx);
         return;
       case "repro": return repro(rest, ctx);
+      case "bisect": return bisectCmd(rest, ctx);
       default: throw new UsageError(`unknown debug subcommand "${sub ?? ""}" (expected: ${SUBCOMMANDS.join(", ")})`);
     }
   },

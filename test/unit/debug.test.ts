@@ -2,11 +2,13 @@
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fixedClock } from "../../src/core/clock.js";
 import { hashBytes } from "../../src/core/determinism.js";
+import { bisect, nextProbe } from "../../src/debug/bisect.js";
 import { runDebugScript, type DebugSandbox } from "../../src/debug/sandbox.js";
+import { gitOut } from "../../src/engagement/git.js";
 import { checkoutWorktree } from "../../src/engagement/source.js";
 import { RefusedError } from "../../src/core/errors.js";
 import { assertCanConclude, assertCanDecide, getDebug, nextId, outcomeOf } from "../../src/debug/state.js";
@@ -163,27 +165,29 @@ describe("the planted-regression fixture", () => {
   });
 });
 
+/** An approved engagement on the planted-regression repo, with D-0001 open and repro.sh written. */
+async function opened() {
+  const repo = await makeRegressionRepo(path.join(tmpDir(), "calc"));
+  const home = tmpDir();
+  await seedHome(home);
+  const radr = cliRunner(home);
+  await radr("init", "acme", "calc");
+  assert.equal((await radr("scope", "-e", "acme-calc", "--source", repo.dir)).code, 0);
+  assert.equal((await radr("approve", "scope", "-e", "acme-calc")).code, 0);
+  assert.equal((await radr("debug", "open", "--issue", "add(2, 2) returns 5", "-e", "acme-calc")).code, 0);
+  const l = layout(home, "acme-calc");
+  const script = path.join(l.debug, "D-0001", "repro", "repro.sh");
+  writeFileSync(script, REGRESSION_REPRO);
+  const log = new EventLog(l.events, fixedClock("2026-10-08T00:00:00.000Z"));
+  const sb = (over: Partial<DebugSandbox> = {}): DebugSandbox => ({
+    runtime: { name: "podman", version: "test" }, stack: "typescript-javascript", dir: ".", image: "test", install: "true",
+    prelude: "", env: {}, online: false, mounts: [], runner: localSandbox, ...over,
+  });
+  const spec = (worktree: string, commit: string) => ({ debugId: "D-0001", kind: "repro" as const, commit, worktree, script });
+  return { repo, radr, l, log, sb, spec, script };
+}
 describe("debug runs in the sandbox (M5 W1)", () => {
-  async function opened() {
-    const repo = await makeRegressionRepo(path.join(tmpDir(), "calc"));
-    const home = tmpDir();
-    await seedHome(home);
-    const radr = cliRunner(home);
-    await radr("init", "acme", "calc");
-    assert.equal((await radr("scope", "-e", "acme-calc", "--source", repo.dir)).code, 0);
-    assert.equal((await radr("approve", "scope", "-e", "acme-calc")).code, 0);
-    assert.equal((await radr("debug", "open", "--issue", "add(2, 2) returns 5", "-e", "acme-calc")).code, 0);
-    const l = layout(home, "acme-calc");
-    const script = path.join(l.debug, "D-0001", "repro", "repro.sh");
-    writeFileSync(script, REGRESSION_REPRO);
-    const log = new EventLog(l.events, fixedClock("2026-10-08T00:00:00.000Z"));
-    const sb = (over: Partial<DebugSandbox> = {}): DebugSandbox => ({
-      runtime: { name: "podman", version: "test" }, stack: "typescript-javascript", dir: ".", image: "test", install: "true",
-      prelude: "", env: {}, online: false, mounts: [], runner: localSandbox, ...over,
-    });
-    const spec = (worktree: string, commit: string) => ({ debugId: "D-0001", kind: "repro" as const, commit, worktree, script });
-    return { repo, radr, l, log, sb, spec, script };
-  }
+
 
   it("reproduces at the bad commit, not at a good one, and records hashes that match the files", async () => {
     const t = await opened();
@@ -225,5 +229,68 @@ describe("debug runs in the sandbox (M5 W1)", () => {
     const frozen = await t.radr("debug", "repro", "D-0001", "-e", "acme-calc");
     assert.equal(frozen.code, 1);
     assert.match(frozen.err, /repro\.sh changed after it reproduced the bug \(DR-0001\)/);
+  });
+});
+
+describe("bisect (M5 W2)", () => {
+  /** Tested commits, in order, for a bisect's runs. */
+  const tested = (log: EventLog) => log.read().filter((e) => e.type === "debug-run" && e.data["kind"] === "bisect").map((e) => String(e.data["commit"]));
+
+  async function reproduced() {
+    const t = await opened();
+    const r = await runDebugScript(t.l, t.log, "consultant", t.sb(), t.spec(t.l.worktree, t.repo.commits.at(-1) ?? ""));
+    assert.equal(r.outcome, "present");
+    return { ...t, d: () => getDebug(t.log.read(), "D-0001") };
+  }
+
+  it("nextProbe: the midpoint, else the nearest untested, unskipped index", () => {
+    assert.equal(nextProbe(-1, 18, new Set()), 8);
+    assert.equal(nextProbe(-1, 18, new Set([8])), 9);
+    assert.equal(nextProbe(-1, 18, new Set([8, 9])), 7);
+    assert.equal(nextProbe(3, 5, new Set([4])), undefined);
+    assert.equal(nextProbe(3, 4, new Set()), undefined);
+  });
+
+  it("finds the planted commit in a handful of runs, records them, and cleans up its worktrees", async () => {
+    const t = await reproduced();
+    const r = await bisect(t.l, t.log, "consultant", t.sb(), t.d(), t.repo.commits[0] ?? "", t.script);
+    assert.deepEqual(r.firstBad, [t.repo.commits[REGRESSION_BAD_INDEX]]);
+    assert.ok(r.runs.length <= 7, `${String(r.runs.length)} runs`);
+    assert.equal(tested(t.log)[0], t.repo.commits[0], "the good end is checked first");
+    const ev = t.log.read().findLast((e) => e.type === "debug-bisected");
+    assert.deepEqual(ev?.data["first_bad"], [t.repo.commits[REGRESSION_BAD_INDEX]]);
+    assert.deepEqual(ev.data["runs"], r.runs.map((x) => x.runId));
+    assert.equal(readdirSync(path.join(t.l.cache, "debug-worktrees")).length, 0);
+    assert.doesNotMatch(await gitOut(["worktree", "list"], t.l.mirror), /debug-worktrees/);
+    const show = await t.radr("debug", "show", "D-0001", "-e", "acme-calc");
+    assert.match(show.out, new RegExp(`bisect: first bad ${t.repo.commits[REGRESSION_BAD_INDEX] ?? ""}`));
+  });
+
+  it("tests the same commits given the same results (determinism)", async () => {
+    const [a, b] = [await reproduced(), await reproduced()];
+    await bisect(a.l, a.log, "c", a.sb(), a.d(), a.repo.commits[0] ?? "", a.script);
+    await bisect(b.l, b.log, "c", b.sb(), b.d(), b.repo.commits[0] ?? "", b.script);
+    assert.deepEqual(tested(a.log), tested(b.log));
+  });
+
+  it("steps around skipped commits and reports a range, never a guess", async () => {
+    const t = await reproduced();
+    const unbuildable = new Set([t.repo.commits[REGRESSION_BAD_INDEX - 1], t.repo.commits[REGRESSION_BAD_INDEX]]);
+    const runner: DebugSandbox["runner"] = (req, out) => {
+      const src = req.mounts.find((m) => m.container === "/src")?.host ?? "";
+      return localSandbox(unbuildable.has(path.basename(src)) ? { ...req, steps: req.steps.map((s) => (s.name === "install" ? { ...s, command: "exit 1" } : s)) } : req, out);
+    };
+    const r = await bisect(t.l, t.log, "consultant", t.sb({ runner }), t.d(), t.repo.commits[0] ?? "", t.script);
+    assert.deepEqual(r.firstBad, t.repo.commits.slice(REGRESSION_BAD_INDEX - 1, REGRESSION_BAD_INDEX + 2));
+    assert.ok(r.firstBad.includes(t.repo.commits[REGRESSION_BAD_INDEX] ?? ""));
+  });
+
+  it("refuses: before a repro, a 'good' commit that's bad, and good == bad", async () => {
+    const fresh = await opened();
+    await assert.rejects(bisect(fresh.l, fresh.log, "c", fresh.sb(), getDebug(fresh.log.read(), "D-0001"), fresh.repo.commits[0] ?? "", fresh.script), /hasn't been reproduced/);
+    const t = await reproduced();
+    await assert.rejects(bisect(t.l, t.log, "c", t.sb(), t.d(), t.repo.commits[15] ?? "", t.script), /bug is present at the "good" commit/);
+    await assert.rejects(bisect(t.l, t.log, "c", t.sb(), t.d(), "HEAD", t.script), /the good commit is the bad commit/);
+    assert.equal(t.log.read().filter((e) => e.type === "debug-bisected").length, 0);
   });
 });
