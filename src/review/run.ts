@@ -47,6 +47,8 @@ export interface LaneSummary {
   readonly attempts: number;
   readonly findings: number;
   readonly detail?: string;
+  /** Diff tier: how many of this lane's findings surfaced after the baseline/changed-file filter. */
+  readonly surfaced?: number;
 }
 
 export interface ReviewResult {
@@ -275,8 +277,10 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     run_id: runId, status, findings_set_hash: ingested.setHash, auto_confirmed: autoConfirmed,
     ...(notes.length > 0 ? { notes } : {}), ...(outputs.length > 0 ? { outputs } : {}),
   });
+  // Diff tier: per-lane counts after the filter, next to the raw ones (dogfood 2026-10-08).
+  const lanesOut = diffKeep === undefined ? summaries : summaries.map((s) => ({ ...s, surfaced: ingested.present.filter((f) => f.lane === s.lane).length }));
   return {
-    runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash,
+    runId, status, lanes: lanesOut, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash,
     autoConfirmed, notes, ...(census !== undefined ? { census } : {}), ...(outputs.length > 0 ? { outputs: outputs.map((o) => o.ref) } : {}),
   };
 }

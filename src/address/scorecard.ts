@@ -90,6 +90,19 @@ function rateCategorical(key: string, inp: ScorecardInputs): { value: string | n
   return { value: null, rating: "grey" };
 }
 
+/** Integer percentages floor to 0 below 1%: say "<1" when something was counted (dogfood). */
+const UNDER_ONE: Readonly<Record<string, readonly [string, string]>> = {
+  complex_functions_pct: ["maint", "complex_functions"],
+  duplication_pct: ["maint", "duplicated_lines"],
+};
+
+function shown(key: string, value: number | null, inp: ScorecardInputs): number | string | null {
+  const src = UNDER_ONE[key];
+  if (value !== 0 || src === undefined) return value;
+  const n = inp.metrics[src[0]]?.[src[1]];
+  return typeof n === "number" && n > 0 ? "<1" : value;
+}
+
 export function computeScorecard(spec: ScorecardSpec, inp: ScorecardInputs): Scorecard {
   const values = metricValues(inp);
   const rows: ScoreRow[] = [];
@@ -99,7 +112,7 @@ export function computeScorecard(spec: ScorecardSpec, inp: ScorecardInputs): Sco
   }
   for (const [key, m] of Object.entries(spec.metrics)) {
     const value = Object.hasOwn(values, key) ? (values[key] ?? null) : null;
-    rows.push({ key, label: m.label, value, rating: rateNumeric(m, value) });
+    rows.push({ key, label: m.label, value: shown(key, value, inp), rating: rateNumeric(m, value) });
   }
   const counts: Record<Rating, number> = { green: 0, amber: 0, red: 0, grey: 0 };
   for (const r of rows) counts[r.rating]++;

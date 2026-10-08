@@ -26,6 +26,9 @@
 #set text(font: "Montserrat", size: 9.5pt, fill: body-text, lang: "en")
 #set par(justify: false, leading: 0.62em, spacing: 1.0em)
 #show raw: set text(font: "DejaVu Sans Mono", size: 8pt)
+// Inline code (paths, rule ids) must wrap inside narrow table columns instead of running into
+// the next one: allow a break after path and name separators. The Markdown keeps plain text.
+#show raw.where(block: false): it => text(font: "DejaVu Sans Mono", size: 8pt, it.text.replace(regex("[/.:_-]"), m => m.text + "\u{200b}"))
 
 #set page(
   paper: "us-letter",

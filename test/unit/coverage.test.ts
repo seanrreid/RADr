@@ -72,6 +72,18 @@ describe("coverage gaps", () => {
   });
 });
 
+describe("scorecard percentages under 1%", () => {
+  it('read "<1" when something was counted, 0 when nothing was', () => {
+    const spec = loadRubric("v2").scorecard;
+    assert.ok(spec);
+    const value = (maint: Record<string, unknown>) => Object.fromEntries(computeScorecard(spec, { metrics: { maint }, findings: [], states: new Map(), lanesRun: new Set(["maint"]) }).rows.map((r) => [r.key, r.value]));
+    const some = value({ complex_functions: 7, complex_functions_pct: 0, duplicated_lines: 64, duplication_pct: 0 });
+    assert.deepEqual([some["complex_functions_pct"], some["duplication_pct"]], ["<1", "<1"]);
+    const none = value({ complex_functions: 0, complex_functions_pct: 0, duplicated_lines: 0, duplication_pct: 0 });
+    assert.deepEqual([none["complex_functions_pct"], none["duplication_pct"]], [0, 0]);
+  });
+});
+
 describe("test-file conventions", () => {
   it("recognise Swift, .NET and JVM test layouts as tests", () => {
     for (const f of ["mac/Tests/SeanboyCoreTests/NoteStoreTests.swift", "src/App.Tests/OrderTests.cs", "app/src/test/kotlin/NoteTest.kt", "lib/NoteSpec_spec.rb", "android/core/src/main/kotlin/NoteTest.kt"]) {

@@ -117,7 +117,8 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     // M3 maint (real lizard + jscpd): the scorecard's complexity and duplication rows have values.
     const card = JSON.parse((await radr(home, { TZ: "UTC", LANG: "C" }, "scorecard", "-e", "acme-e2e", "--json")).out) as { rows: { key: string; value: unknown }[] };
     for (const key of ["complex_functions_pct", "duplication_pct"]) {
-      assert.equal(typeof card.rows.find((r) => r.key === key)?.value, "number", `${key} should be measured`);
+      const v = card.rows.find((r) => r.key === key)?.value;
+      assert.ok(typeof v === "number" || v === "<1", `${key} should be measured (got ${String(v)})`);
     }
 
     const engagement = path.join(home, "engagements", "acme-e2e");

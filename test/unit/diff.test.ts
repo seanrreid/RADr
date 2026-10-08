@@ -59,6 +59,7 @@ describe("diff tier", () => {
 
     const r = await t.e("review");
     assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /lint +success +continue +findings=3 surfaced=1/, "raw and surfaced counts side by side");
     assert.deepEqual((await t.lint()).map((f) => f.file), ["app/d.py"], "a.py is untouched, b.py's finding is baselined");
     const done = t.events().findLast((e) => e.type === "run-completed");
     assert.match(String((done?.data["notes"] as string[] | undefined)?.join(" ")), /diff: 2 finding\(s\) outside the change or already in the baseline were not surfaced/);

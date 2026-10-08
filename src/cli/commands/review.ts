@@ -39,7 +39,7 @@ export const review: CommandSpec = {
     const r = await runReview(home, l, await resolveActor(ctx.env), ctx.clock, ctx.env);
     ctx.out(`run ${r.runId}: ${r.status}`);
     for (const s of r.lanes) {
-      ctx.out(`  ${s.lane.padEnd(8)} ${s.outcome.padEnd(14)} ${s.action.padEnd(9)} findings=${s.findings}${s.attempts > 1 ? ` attempts=${s.attempts}` : ""}`);
+      ctx.out(`  ${s.lane.padEnd(8)} ${s.outcome.padEnd(14)} ${s.action.padEnd(9)} findings=${s.findings}${s.surfaced === undefined ? "" : ` surfaced=${String(s.surfaced)}`}${s.attempts > 1 ? ` attempts=${s.attempts}` : ""}`);
       if (s.detail !== undefined && s.outcome !== "success") ctx.out(`           ${s.detail}`);
     }
     if (r.setHash !== null) ctx.out(`findings: ${r.findings} present (${r.added} new); set ${r.setHash}`);
