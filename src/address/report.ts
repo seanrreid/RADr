@@ -258,7 +258,7 @@ function planSummary(waves: readonly PlanWave[]): string {
 type SectionId =
   | "executive-summary" | "at-a-glance" | "top-risks" | "key-risks" | "findings" | "judgments" | "coverage" | "licenses"
   | "hygiene" | "remediation" | "recommendations" | "verification" | "methodology" | "appendix"
-  | "security-posture" | "vulnerabilities" | "secrets" | "maintainability" | "hotspots" | "license-risk" | "coverage-gaps";
+  | "security-posture" | "vulnerabilities" | "secrets" | "maintainability" | "hotspots" | "license-risk" | "coverage-gaps" | "agent-readiness";
 
 interface Template {
   readonly sections: readonly SectionId[];
@@ -266,7 +266,7 @@ interface Template {
 }
 
 const BALANCED: Template = {
-  sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "findings", "judgments", "coverage", "licenses", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+  sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "findings", "judgments", "coverage", "licenses", "hygiene", "agent-readiness", "remediation", "recommendations", "verification", "methodology", "appendix"],
   categoryOrder: CATEGORY_ORDER,
 };
 
@@ -277,17 +277,17 @@ export const TEMPLATES: Readonly<Record<string, Template>> = {
   triage: { sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "judgments", "verification", "methodology"], categoryOrder: CATEGORY_ORDER },
   // Code quality: lint, types, complexity, duplication, tests first; security still reported.
   quality: {
-    sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "maintainability", "findings", "judgments", "coverage", "remediation", "recommendations", "licenses", "hygiene", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "at-a-glance", "coverage-gaps", "top-risks", "maintainability", "findings", "judgments", "coverage", "agent-readiness", "remediation", "recommendations", "licenses", "hygiene", "verification", "methodology", "appendix"],
     categoryOrder: ["quality", "maintainability", "test", "coverage", "security", "secrets", "dependency", "iac", "license"],
   },
   // Security: posture, secrets, and vulnerabilities with CVSS/EPSS/KEV first.
   security: {
-    sections: ["executive-summary", "security-posture", "coverage-gaps", "top-risks", "secrets", "vulnerabilities", "findings", "judgments", "licenses", "remediation", "recommendations", "at-a-glance", "coverage", "hygiene", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "security-posture", "coverage-gaps", "top-risks", "secrets", "vulnerabilities", "findings", "judgments", "licenses", "agent-readiness", "remediation", "recommendations", "at-a-glance", "coverage", "hygiene", "verification", "methodology", "appendix"],
     categoryOrder: ["secrets", "security", "dependency", "iac", "license", "maintainability", "test", "quality", "coverage"],
   },
   // Due diligence: exec-first; risks a buyer weighs (hotspots, bus factor, licenses, CVEs).
   "due-diligence": {
-    sections: ["executive-summary", "key-risks", "at-a-glance", "coverage-gaps", "hotspots", "license-risk", "vulnerabilities", "maintainability", "findings", "judgments", "coverage", "hygiene", "remediation", "recommendations", "verification", "methodology", "appendix"],
+    sections: ["executive-summary", "key-risks", "at-a-glance", "coverage-gaps", "hotspots", "license-risk", "vulnerabilities", "maintainability", "findings", "judgments", "coverage", "hygiene", "agent-readiness", "remediation", "recommendations", "verification", "methodology", "appendix"],
     categoryOrder: ["license", "secrets", "dependency", "security", "maintainability", "test", "coverage", "iac", "quality"],
   },
 };
@@ -308,6 +308,35 @@ function securityPosture(inp: RunInputs): string {
     "",
     `Known-exploited (CISA KEV): ${String(kev)}. Likely to be exploited (EPSS 10% or more): ${String(epss)}. Dismissed findings are not counted.`,
   ].join("\n");
+}
+
+/** The census's readiness metric (src/review/readiness.ts), stated without a rating. */
+function agentReadiness(inp: RunInputs): string | null {
+  const r = inp.metrics["census"]?.["readiness"] as {
+    suppressions: { total: number; tests?: number; generated?: number; per_kloc_x10: number; by_kind: Record<string, number>; top_files: { file: string; count: number }[] };
+    typescript: { configs: { file: string; strict: string; no_unchecked_indexed_access: boolean }[] };
+    ci: { files: string[]; lint: boolean; types: boolean; tests: boolean };
+    agent_files: string[];
+  } | undefined;
+  if (r === undefined) return null;
+  const s = r.suppressions;
+  const kinds = stableSort(Object.entries(s.by_kind), ([k, n]) => [-n, k]).map(([k, n]) => `${k} ${String(n)}`).join(", ");
+  const ts = r.typescript.configs;
+  const strictOn = ts.filter((c) => c.strict === "on").length;
+  const yes = (b: boolean) => (b ? "yes" : "no");
+  const rows: string[][] = [
+    ["Inline suppressions in production code (code that switches a check off)", `${s.total === 0 ? "none" : `${String(s.total)} (${String(Math.floor(s.per_kloc_x10 / 10))}.${String(s.per_kloc_x10 % 10)} per 1,000 lines): ${esc(kinds)}`}${(s.tests ?? 0) + (s.generated ?? 0) > 0 ? `; also ${String(s.tests ?? 0)} in tests and ${String(s.generated ?? 0)} in generated files` : ""}`],
+    ["TypeScript strict mode", ts.length === 0 ? "no TypeScript configuration" : `on in ${String(strictOn)} of ${String(ts.length)} config(s)${ts.some((c) => c.strict === "inherited") ? " (some inherit it from a shared config radr didn't resolve)" : ""}`],
+    ["CI runs the checks", r.ci.files.length === 0 ? "no CI configuration found" : `lint ${yes(r.ci.lint)}, type checks ${yes(r.ci.types)}, tests ${yes(r.ci.tests)}`],
+    ["Instructions for AI agents", r.agent_files.length === 0 ? "none" : esc(r.agent_files.join(", "))],
+  ];
+  const parts = [
+    "AI coding agents run a project's own checks after every change, so how strict those checks are, whether CI enforces them, and how often code switches them off decide how safely agents (and people) can change this codebase. radr's own analysis ignores inline suppressions in lint, SAST and secrets scanning; the counts here measure how often the code relies on them.",
+    "",
+    table(["Signal", "Observed"], rows, [40, 60]),
+  ];
+  if (s.top_files.length > 0) parts.push("", "**Most suppressions**", "", table(["File", "Suppressions"], s.top_files.map((f) => [code(f.file), String(f.count)])));
+  return parts.join("\n");
 }
 
 /** Coverage gaps (src/review/coverage.ts), recomputed from the run's metrics. */
@@ -414,6 +443,7 @@ export function renderReport(inp: RunInputs, l: Layout, card: Scorecard | undefi
     hotspots: () => ["Hotspots and ownership", hotspots(inp)],
     // Due diligence: license risk is a deal term, so its absence is stated, never silent.
     "coverage-gaps": () => ["What this review could not assess", coverageSectionGaps(inp)],
+    "agent-readiness": () => ["Readiness for AI-assisted development", agentReadiness(inp)],
     "license-risk": () => ["License risk", licenseSection(inp) ?? "License compliance was not assessed in this run: the license lane runs only in container mode (`network: { mode: offline, enforcement: container }`). Treat license risk as unknown."],
   };
   const parts = [frontMatter(inp, l, card, runDate)];

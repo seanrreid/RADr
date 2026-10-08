@@ -13,6 +13,7 @@ import { hygiene, iac, license, maint } from "./health.js";
 import { history, tests } from "./metrics.js";
 import { coverage, eslintProject, stackLint, stackLintSkipped, types } from "./sandboxed.js";
 import { lockfiles, sastCoverage } from "../review/coverage.js";
+import { readinessMetrics } from "../review/readiness.js";
 
 export const census: Lane = {
   id: "census",
@@ -22,6 +23,11 @@ export const census: Lane = {
     const s = await step(ctx, "census", "scc", "scc.json",
       () => ctx.tools.exec({ command: bin(ctx, "scc"), args: ["--format", "json", "--no-cocomo", "--by-file", "--no-gitignore", "--no-ignore", "."], cwd: ctx.layout.worktree, env: toolEnv(ctx) }),
       (raw) => { metrics = sccMetrics(raw); return []; });
+    // Readiness for AI-assisted development: suppressions, TS strictness, CI checks, agent files.
+    if (metrics !== undefined) {
+      const files = (metrics["files"] ?? {}) as Parameters<typeof readinessMetrics>[2];
+      metrics = { ...metrics, readiness: readinessMetrics(realWorktree(ctx), listFiles(realWorktree(ctx)), files) };
+    }
     return combine([s], metrics);
   },
 };

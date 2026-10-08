@@ -81,6 +81,17 @@ _Write the executive summary here. radr preserves this block when the report is 
 | npm lodash\@4.17.20 | high | 1 | ≥ 4.17.21 | `package-lock.json` | F-0004 |
 | PyPI requests\@2.19.1 | medium | 1 | ≥ 2.20.0 | `requirements.txt` | F-0006 |
 
+# Readiness for AI-assisted development
+
+AI coding agents run a project's own checks after every change, so how strict those checks are, whether CI enforces them, and how often code switches them off decide how safely agents (and people) can change this codebase. radr's own analysis ignores inline suppressions in lint, SAST and secrets scanning; the counts here measure how often the code relies on them.
+
+| Signal | Observed |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| Inline suppressions in production code (code that switches a check off) | none |
+| TypeScript strict mode | no TypeScript configuration |
+| CI runs the checks | no CI configuration found |
+| Instructions for AI agents | none |
+
 # Remediation overview
 
 | Wave | Focus | Work items | Findings |
