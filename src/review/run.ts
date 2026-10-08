@@ -21,6 +21,7 @@ import { dispositions, stateOf } from "../findings/disposition.js";
 import type { Finding } from "../findings/types.js";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
 import { changedFiles, diffFilter, readBaseline } from "../diff/baseline.js";
+import { writePrOutputs } from "../diff/outputs.js";
 import { writeScopeSnapshot } from "./scope-snapshot.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { loadVulnContext } from "../toolchain/vulnctx.js";
@@ -58,6 +59,8 @@ export interface ReviewResult {
   readonly autoConfirmed?: number;
   /** Fail-open gaps (P7), e.g. no EPSS/KEV snapshot pinned. */
   readonly notes?: readonly string[];
+  /** Diff tier: the PR outputs written (review/pr-<head>.sarif, .md). */
+  readonly outputs?: readonly string[];
 }
 
 /** Throws RefusedError unless the scope gate is open for the CURRENT scope and worktree. */
@@ -264,13 +267,15 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     throw e;
   }
   const autoConfirmed = applyAutoConfirm(log, rubric, ingested.present);
+  // Diff tier (M6): SARIF + the PR summary, hash-linked from run-completed.
+  const outputs = diffKeep === undefined ? [] : writePrOutputs(l, doc, runId, ingested.present, ingested.suppressed);
   log.append("run-completed", actor, {
     run_id: runId, status, findings_set_hash: ingested.setHash, auto_confirmed: autoConfirmed,
-    ...(notes.length > 0 ? { notes } : {}),
+    ...(notes.length > 0 ? { notes } : {}), ...(outputs.length > 0 ? { outputs } : {}),
   });
   return {
     runId, status, lanes: summaries, findings: ingested.present.length, added: ingested.added, setHash: ingested.setHash,
-    autoConfirmed, notes, ...(census !== undefined ? { census } : {}),
+    autoConfirmed, notes, ...(census !== undefined ? { census } : {}), ...(outputs.length > 0 ? { outputs: outputs.map((o) => o.ref) } : {}),
   };
 }
 

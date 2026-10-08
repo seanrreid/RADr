@@ -72,7 +72,11 @@ const PAYLOADS = {
     ["run_id", "lane", "attempt", "outcome", "action", "tools"],
   ),
   "run-completed": obj(
-    { run_id: runId, status: { enum: ["complete", "partial", "aborted"] }, findings_set_hash: sha, notes: { type: "array", items: { type: "string" } }, auto_confirmed: { type: "integer", minimum: 0 } },
+    {
+      run_id: runId, status: { enum: ["complete", "partial", "aborted"] }, findings_set_hash: sha, notes: { type: "array", items: { type: "string" } }, auto_confirmed: { type: "integer", minimum: 0 },
+      // M6 diff tier: the PR outputs (SARIF, Markdown summary) and their hashes.
+      outputs: { type: "array", items: obj({ ref: str, hash: sha }) },
+    },
     ["run_id", "status"],
   ),
   "report-generated": obj({ run_id: runId, findings_set_hash: sha, report_hash: sha, remediation_hash: sha }),

@@ -5,6 +5,10 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fixedClock } from "../../src/core/clock.js";
+import { hashBytes } from "../../src/core/determinism.js";
+import { InternalError } from "../../src/core/errors.js";
+import { SARIF_SCHEMA } from "../../src/diff/outputs.js";
+import { makeValidator } from "../../src/schemas/validate.js";
 import { parseEngagement } from "../../src/engagement/config.js";
 import { layout } from "../../src/engagement/home.js";
 import { EventLog } from "../../src/state/events.js";
@@ -64,6 +68,47 @@ describe("diff tier", () => {
     const tampered = await t.e("review");
     assert.equal(tampered.code, 1);
     assert.match(tampered.err, /baseline\.json changed after the scope was approved/);
+  });
+
+  it("writes SARIF 2.1.0 and a PR summary of only the new findings, byte-identically (AC8)", async () => {
+    const run = async () => {
+      const t = await prReview();
+      await t.e("baseline", "set", "--from", "R-0001");
+      await t.e("scope", "--rev", t.head, "--base", t.base);
+      await t.e("approve", "scope");
+      const r = await t.e("review");
+      assert.match(r.out, /pr output: review\/pr-[0-9a-f]{12}\.sarif/);
+      const stem = path.join(t.l.dir, "review", `pr-${t.head.slice(0, 12)}`);
+      return { sarif: readFileSync(`${stem}.sarif`, "utf8"), md: readFileSync(`${stem}.md`, "utf8"), t };
+    };
+    const a = await run();
+    const b = await run();
+    assert.equal(a.sarif, b.sarif);
+    assert.equal(a.md, b.md);
+    const doc = JSON.parse(a.sarif) as { version: string; runs: { results: { ruleId: string; level: string; locations: { physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number } } }[]; partialFingerprints: Record<string, string> }[]; properties: Record<string, string> }[] };
+    assert.equal(doc.version, "2.1.0");
+    const [res, ...more] = doc.runs[0]?.results ?? [];
+    assert.equal(more.length, 0);
+    assert.deepEqual([res?.ruleId, res?.locations[0]?.physicalLocation.artifactLocation.uri, res?.locations[0]?.physicalLocation.region.startLine], ["ruff/F401", "app/d.py", 1]);
+    assert.match(res?.partialFingerprints["radr/v1"] ?? "", /^sha256:/);
+    assert.deepEqual([doc.runs[0]?.properties["base"], doc.runs[0]?.properties["head"]], [a.t.base, a.t.head]);
+    assert.match(a.md, /^## radr review: acme\/pr, [0-9a-f]{12}\.\.\.[0-9a-f]{12}\n\n\*\*1 new finding\(s\)\*\*: 1 [a-z]+\./);
+    assert.match(a.md, /\| `ruff\/F401` \| `app\/d\.py:1` \| unused import \|/);
+    assert.match(a.md, /\(2 suppressed\)/);
+    const outputs = a.t.events().findLast((e) => e.type === "run-completed")?.data["outputs"] as { ref: string; hash: string }[];
+    assert.deepEqual(outputs.map((o) => o.ref), [`review/pr-${a.t.head.slice(0, 12)}.sarif`, `review/pr-${a.t.head.slice(0, 12)}.md`]);
+    assert.equal(outputs[0]?.hash, hashBytes(a.sarif));
+  });
+
+  it("the SARIF schema check rejects what SARIF 2.1.0 forbids", () => {
+    const v = makeValidator<unknown>(SARIF_SCHEMA, InternalError);
+    const ok = { $schema: "https://json.schemastore.org/sarif-2.1.0.json", version: "2.1.0", runs: [{ tool: { driver: { name: "radr", rules: [] } }, results: [] }] };
+    assert.doesNotThrow(() => v(ok, "sarif"));
+    const bad = (r: unknown) => ({ ...ok, runs: [{ tool: ok.runs[0]?.tool, results: [r] }] });
+    const result = { ruleId: "x/y", level: "error", message: { text: "m" }, locations: [{ physicalLocation: { artifactLocation: { uri: "a" }, region: { startLine: 1 } } }], partialFingerprints: { "radr/v1": "f" }, properties: {} };
+    assert.doesNotThrow(() => v(bad(result), "sarif"));
+    assert.throws(() => v(bad({ ...result, level: "critical" }), "sarif"), InternalError);
+    assert.throws(() => v(bad({ ...result, locations: [{ physicalLocation: { artifactLocation: { uri: "a" }, region: { startLine: 0 } } }] }), "sarif"), InternalError);
   });
 
   it("engagement.yml: the diff tier and the diff block come together", () => {

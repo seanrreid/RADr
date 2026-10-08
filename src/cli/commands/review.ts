@@ -45,6 +45,7 @@ export const review: CommandSpec = {
     if (r.setHash !== null) ctx.out(`findings: ${r.findings} present (${r.added} new); set ${r.setHash}`);
     if ((r.autoConfirmed ?? 0) > 0) ctx.out(`auto-confirmed by rubric: ${r.autoConfirmed ?? 0} (the review set always needs you)`);
     for (const n of r.notes ?? []) ctx.out(`note: ${n}`);
+    for (const o of r.outputs ?? []) ctx.out(`pr output: ${o}`);
     if (r.status === "aborted") throw new RefusedError(`run ${r.runId} aborted (see lane outcomes above)`);
   },
 };
