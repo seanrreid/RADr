@@ -40,7 +40,8 @@ export const review: CommandSpec = {
     ctx.out(`run ${r.runId}: ${r.status}`);
     for (const s of r.lanes) {
       ctx.out(`  ${s.lane.padEnd(8)} ${s.outcome.padEnd(14)} ${s.action.padEnd(9)} findings=${s.findings}${s.surfaced === undefined ? "" : ` surfaced=${String(s.surfaced)}`}${s.attempts > 1 ? ` attempts=${s.attempts}` : ""}`);
-      if (s.detail !== undefined && s.outcome !== "success") ctx.out(`           ${s.detail}`);
+      // Details print for every lane: a successful lane can still say what it skipped and how to fix it.
+      if (s.detail !== undefined) ctx.out(`           ${s.detail}`);
     }
     if (r.setHash !== null) ctx.out(`findings: ${r.findings} present (${r.added} new); set ${r.setHash}`);
     if ((r.autoConfirmed ?? 0) > 0) ctx.out(`auto-confirmed by rubric: ${r.autoConfirmed ?? 0} (the review set always needs you)`);
