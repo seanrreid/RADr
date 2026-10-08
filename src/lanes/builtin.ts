@@ -51,8 +51,10 @@ export const lint: Lane = {
       steps.push(await step(ctx, "lint", "eslint", "eslint.json",
         () => ctx.tools.exec({
           command: ctx.tools.node,
+          // --no-inline-config: an eslint-disable comment in client code can't hide a baseline
+          // finding (the baseline is radr's config, not the client's; inline comments are config too).
           args: [path.join(nt, "node_modules", "eslint", "bin", "eslint.js"), "--config", path.join(nt, ESLINT_BASELINE), "--format", "json",
-            "--no-warn-ignored", "--no-error-on-unmatched-pattern", "."],
+            "--no-warn-ignored", "--no-error-on-unmatched-pattern", "--no-inline-config", "."],
           cwd: wt, env: toolEnv(ctx), okExitCodes: [0, 1],
         }),
         (raw, ref) => eslintAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["node-tools"] ?? "", snippet: read })));
@@ -61,7 +63,7 @@ export const lint: Lane = {
       steps.push(await step(ctx, "lint", "ruff", "ruff.json",
         () => ctx.tools.exec({
           command: bin(ctx, "ruff"),
-          args: ["check", "--config", ctx.tools.ruffConfig, "--output-format", "json", "--no-cache", "--exit-zero", "."],
+          args: ["check", "--config", ctx.tools.ruffConfig, "--output-format", "json", "--no-cache", "--exit-zero", "--ignore-noqa", "."],
           cwd: wt, env: toolEnv(ctx),
         }),
         (raw, ref) => ruffAdapter({ raw, rawRef: ref, repoRoot: wt, toolVersion: ctx.tools.versions["ruff"] ?? "", snippet: read })));
@@ -79,6 +81,16 @@ export const lint: Lane = {
   },
 };
 
+/**
+ * gitleaks:allow comments and a .gitleaksignore in the client repo can't hide a secret: radr
+ * ignores the comments and points the ignore path at an empty directory it owns.
+ */
+function gitleaksNoSuppress(rawDirPath: string): string[] {
+  const empty = path.join(rawDirPath, "no-gitleaksignore");
+  mkdirSync(empty, { recursive: true });
+  return ["--ignore-gitleaks-allow", `--gitleaks-ignore-path=${empty}`];
+}
+
 export const secrets: Lane = {
   id: "secrets",
   tools: ["gitleaks"],
@@ -92,8 +104,8 @@ export const secrets: Lane = {
       // Triage scans HEAD only (PRD §5); the diff tier, the PR's own commits (base..head, M6);
       // every other tier, the approved SHA's full history.
       args: ctx.doc.tier === "triage"
-        ? ["dir", "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", wt]
-        : ["git", `--log-opts=${ctx.doc.diff === undefined ? sha : `${ctx.doc.diff.base}..${sha}`}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
+        ? ["dir", ...gitleaksNoSuppress(dir), "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", wt]
+        : ["git", `--log-opts=${ctx.doc.diff === undefined ? sha : `${ctx.doc.diff.base}..${sha}`}`, ...gitleaksNoSuppress(dir), "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
       cwd: ctx.layout.dir, env: toolEnv(ctx),
     });
     // gitleaks writes its report to a file; stdout holds only logs. Hash and adapt the report.
@@ -162,7 +174,8 @@ export const sast: Lane = {
     const s = await step(ctx, "sast", "opengrep", "opengrep.json",
       () => ctx.tools.exec({
         command: bin(ctx, "opengrep"),
-        args: ["scan", "--no-rewrite-rule-ids", ...configs, "--json", "--quiet", "."],
+        // --disable-nosem: a `nosemgrep` comment in client code can't hide a SAST finding.
+        args: ["scan", "--no-rewrite-rule-ids", "--disable-nosem", ...configs, "--json", "--quiet", "."],
         cwd: wt, env: toolEnv(ctx, OPENGREP_ENV), okExitCodes: [0, 1], timeoutMs: 30 * 60 * 1000,
       }),
       (raw, ref) => {

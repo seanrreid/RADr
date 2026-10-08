@@ -396,3 +396,19 @@ export async function makeDiffRepo(dir: string): Promise<FixtureRepo> {
   await g(dir, ["commit", "-q", "-m", "pr: change b, add d"], "2026-04-02T10:00:00Z");
   return { dir, commits: [base, await g(dir, ["rev-parse", "HEAD"], "2026-04-02T10:00:00Z")] };
 }
+
+/**
+ * Suppression fixture (2026-10-08): every planted signal carries the client's own "ignore this"
+ * comment. radr's baseline tools must report all of them anyway.
+ */
+export async function makeSuppressedRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-05-01T00:00:00Z");
+  write(dir, "src/run.js", "function run(input) {\n  return eval(input); // eslint-disable-line no-eval\n}\nmodule.exports = { run };\n");
+  write(dir, "app/tool.py", "import os  # noqa: F401\nimport subprocess\n\n\ndef run(cmd):\n    return subprocess.call(cmd, shell=True)  # nosemgrep\n");
+  write(dir, "config/app.env", `AWS_ACCESS_KEY_ID=${FAKE_AWS_KEY_ID} # gitleaks:allow\n`);
+  write(dir, ".gitleaksignore", "config/app.env:aws-access-token:1\n");
+  await g(dir, ["add", "-A"], "2026-05-01T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "suppressed signals"], "2026-05-01T10:00:00Z");
+  return { dir, commits: [await g(dir, ["rev-parse", "HEAD"], "2026-05-01T10:00:00Z")] };
+}

@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { FAKE_AWS_KEY_ID, POLYGLOT, makeDiffRepo, makeFixtureRepo, makePolyglotFixtureRepo, makeVerifyRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { FAKE_AWS_KEY_ID, POLYGLOT, makeDiffRepo, makeFixtureRepo, makeSuppressedRepo, makePolyglotFixtureRepo, makeVerifyRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { promptFreeText } from "../../src/llm/prompt.js";
 import { leakedRuns } from "../../src/llm/redact.js";
 import { writeProse } from "../helpers/prose.js";
@@ -236,6 +236,16 @@ describe("M1 end-to-end with real tools", { skip: TOOLS_HOME === undefined ? "se
     assert.equal(a.md, b.md);
     const results = (JSON.parse(a.sarif) as { runs: { results: { ruleId: string; locations: { physicalLocation: { artifactLocation: { uri: string } } }[] }[] }[] }).runs[0]?.results ?? [];
     assert.deepEqual(results.map((r) => [r.ruleId, r.locations[0]?.physicalLocation.artifactLocation.uri]), [["ruff/F401", "app/d.py"]]);
+  });
+
+  it("inline suppressions in client code can't hide findings from radr's baseline tools", async () => {
+    const repo = await makeSuppressedRepo(path.join(fixtureRoot, "suppressed"));
+    const { findings } = await fullPipeline(repo, { TZ: "UTC", LANG: "C" });
+    const has = (pred: (f: Record<string, unknown>) => boolean, what: string) => { assert.ok(findings.some(pred), `expected ${what} despite its suppression comment`); };
+    has((f) => f["tool"] === "eslint" && f["rule_id"] === "no-eval" && f["file"] === "src/run.js", "eslint no-eval (eslint-disable-line)");
+    has((f) => f["tool"] === "ruff" && f["rule_id"] === "F401" && f["file"] === "app/tool.py", "ruff F401 (# noqa)");
+    has((f) => f["tool"] === "opengrep" && f["file"] === "app/tool.py" && f["line"] === 6, "SAST shell=True (# nosemgrep)");
+    has((f) => f["tool"] === "gitleaks" && f["file"] === "config/app.env", "the AWS key (gitleaks:allow and .gitleaksignore)");
   });
 
   it("M3: every new stack is detected, and sca and sast find its planted signals (AC11)", async () => {
