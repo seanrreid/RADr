@@ -154,6 +154,8 @@ const PAYLOADS = {
       still_present: { type: "integer", minimum: 0 }, manual: { type: "array", items: { type: "string", pattern: FINDING_ID } },
     },
   ),
+  // M6: baseline.json written from a run's findings (the diff tier suppresses against it).
+  "baseline-set": obj({ run_id: runId, baseline_hash: sha, findings: { type: "integer", minimum: 0 } }),
   "finding-disposition": obj(
     { finding_id: { type: "string", pattern: FINDING_ID }, from: str, to: str, reason: { type: "string" } },
     ["finding_id", "from", "to"],

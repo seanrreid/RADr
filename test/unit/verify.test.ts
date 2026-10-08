@@ -9,7 +9,7 @@ import { layout } from "../../src/engagement/home.js";
 import { checkTransition } from "../../src/findings/disposition.js";
 import { EventLog } from "../../src/state/events.js";
 import { scopeDifference } from "../../src/verify/verify.js";
-import type { ScopeSnapshot } from "../../src/review/run.js";
+import type { ScopeSnapshot } from "../../src/review/scope-snapshot.js";
 import { cliRunner } from "../helpers/cli.js";
 import { seedHome, setFakeTool } from "../helpers/fake-toolchain.js";
 import { VERIFY_RUFF, makeVerifyRepo, type FixtureRepo } from "../helpers/fixture-repo.js";

@@ -82,10 +82,11 @@ export const secrets: Lane = {
     const wt = realWorktree(ctx);
     const r = await ctx.tools.exec({
       command: bin(ctx, "gitleaks"),
-      // Triage scans HEAD only (PRD §5); every other tier scans the approved SHA's full history.
+      // Triage scans HEAD only (PRD §5); the diff tier, the PR's own commits (base..head, M6);
+      // every other tier, the approved SHA's full history.
       args: ctx.doc.tier === "triage"
         ? ["dir", "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", wt]
-        : ["git", `--log-opts=${sha}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
+        : ["git", `--log-opts=${ctx.doc.diff === undefined ? sha : `${ctx.doc.diff.base}..${sha}`}`, "--redact", "--no-banner", "--log-level=warn", "--report-format", "json", "--report-path", report, "--exit-code", "0", ctx.layout.mirror],
       cwd: ctx.layout.dir, env: toolEnv(ctx),
     });
     // gitleaks writes its report to a file; stdout holds only logs. Hash and adapt the report.

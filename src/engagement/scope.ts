@@ -22,6 +22,7 @@ import { scopeUsesSandbox } from "../sandbox/stacks.js";
 import { stackImages } from "../sandbox/stack-images.js";
 import { listDeps, verifyDeps } from "../sandbox/deps.js";
 import { detectStacks, type Detection } from "./detect.js";
+import { baselineFile } from "../diff/baseline.js";
 import type { Layout } from "./home.js";
 import { checkoutWorktree, mirrorSource, refsHash, resolveSha, verifyWorktree } from "./source.js";
 
@@ -39,6 +40,8 @@ export interface ScopeRequest {
   readonly env?: NodeJS.ProcessEnv;
   /** OSV snapshot id to pin; defaults to the newest. */
   readonly snapshot?: string;
+  /** Diff tier (M6): the PR's base commit-ish. Needs baseline.json (radr baseline set). */
+  readonly base?: string;
 }
 
 export interface ScopeResult {
@@ -73,8 +76,19 @@ export async function proposeScope(req: ScopeRequest): Promise<ScopeResult> {
   const created = log.read().find((e) => e.type === "engagement-created");
   if (created === undefined) throw new RefusedError(`${l.events}: missing engagement-created event`);
 
+  // Diff tier: --base (re)pins the base and the baseline's current hash; a re-scope without it
+  // keeps the existing base and refreshes the baseline hash.
+  const baseRev = req.base ?? existing?.diff?.base;
+  let diff: EngagementDoc["diff"];
+  if (baseRev !== undefined) {
+    const f = baselineFile(l);
+    if (!existsSync(f)) throw new UsageError("a diff scope needs a baseline: radr baseline set --from <R-id> first");
+    diff = { base: await resolveSha(l.mirror, baseRev), baseline: hashBytes(readFileSync(f)) };
+    if (diff.base === sha) throw new UsageError("the base and the head are the same commit");
+  }
+  const withDiff = (d: EngagementDoc): EngagementDoc => (diff === undefined ? d : { ...d, tier: "diff", diff });
   const doc: EngagementDoc = existing
-    ? { ...existing, source: { ...existing.source, sha }, stacks: detection.stacks, ...(existing.build === undefined && canSandbox ? { build: recipe } : {}) }
+    ? withDiff({ ...existing, source: { ...existing.source, sha }, stacks: detection.stacks, ...(existing.build === undefined && canSandbox ? { build: recipe } : {}) })
     : {
         version: 1,
         client: String(created.data["client"]),

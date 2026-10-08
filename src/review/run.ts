@@ -20,7 +20,8 @@ import { autoConfirms, loadRubric, type Rubric } from "../rubric/rubric.js";
 import { dispositions, stateOf } from "../findings/disposition.js";
 import type { Finding } from "../findings/types.js";
 import { canonicalJson, hashBytes, stableSort } from "../core/determinism.js";
-import { parseYaml } from "../core/yaml.js";
+import { changedFiles, diffFilter, readBaseline } from "../diff/baseline.js";
+import { writeScopeSnapshot } from "./scope-snapshot.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { loadVulnContext } from "../toolchain/vulnctx.js";
 import { EventLog } from "../state/events.js";
@@ -96,28 +97,6 @@ function toolProblems(l: Layout, checks: readonly ToolCheck[], liveSandbox: Tool
   return { byTool, lines };
 }
 
-/** raw/<run>/scope.json: the engagement doc and both locks a run was scoped with (M6 verify). */
-export interface ScopeSnapshot {
-  readonly engagement: EngagementDoc;
-  readonly toolchain_lock: unknown;
-  readonly snapshots_lock: unknown;
-}
-
-function writeScopeSnapshot(l: Layout, runId: string, doc: EngagementDoc): { ref: string; hash: string } {
-  const read = (f: string): unknown => (existsSync(f) ? parseYaml(readFileSync(f, "utf8"), f) : null);
-  const snap: ScopeSnapshot = { engagement: doc, toolchain_lock: read(l.toolchainLock), snapshots_lock: read(l.snapshotsLock) };
-  const dir = path.join(l.raw, runId);
-  mkdirSync(dir, { recursive: true });
-  const body = canonicalJson(snap);
-  writeFileSync(path.join(dir, "scope.json"), body);
-  return { ref: `raw/${runId}/scope.json`, hash: hashBytes(body) };
-}
-
-export function readScopeSnapshot(l: Layout, runId: string): ScopeSnapshot | null {
-  const f = path.join(l.raw, runId, "scope.json");
-  return existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as ScopeSnapshot) : null;
-}
-
 export function snapshotsFor(home: string, l: Layout): { osvDb: string | null; depsCache: string | null } {
   const snaps = readSnapshotsLock(l.snapshotsLock);
   let osvDb: string | null = null;
@@ -185,6 +164,8 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
   const matrix = Matrix.load();
   const { doc, fingerprint } = await assertScope(l, gates, log);
   if (doc.lanes.length === 0) throw new RefusedError(`${l.id} has no lanes (a standalone debug engagement): use \`radr debug\``);
+  // The diff tier (M6): fail before any lane runs if the pinned baseline is missing or edited.
+  const diffKeep = doc.diff === undefined ? undefined : diffFilter(readBaseline(l, doc.diff.baseline), await changedFiles(l.mirror, doc.diff.base, doc.source.sha));
   const rubric = loadRubric(doc.rubric);
 
   const lock = readLock(l.toolchainLock);
@@ -275,7 +256,8 @@ export async function review(home: string, l: Layout, actor: string, clock: Cloc
     const pinned = readSnapshotsLock(l.snapshotsLock);
     const vulns = loadVulnContext(home, { epss: pinned.epss, kev: pinned.kev });
     if (drafts.some((d) => d.cve !== null)) notes = vulns.gaps;
-    ingested = ingest(l.findings, runId, doc, rubric, drafts, vulns.ctx);
+    ingested = ingest(l.findings, runId, doc, rubric, drafts, vulns.ctx, diffKeep);
+    if (diffKeep !== undefined) notes = [...notes, `diff: ${String(ingested.suppressed)} finding(s) outside the change or already in the baseline were not surfaced`];
   } catch (e) {
     // e.g. the rubric refuses an unmapped (tool, severity): the run must still be closed, as aborted.
     log.append("run-completed", actor, { run_id: runId, status: "aborted" });

@@ -376,3 +376,23 @@ export async function makeVerifyRepo(dir: string): Promise<FixtureRepo> {
 
 /** Fake ruff for makeVerifyRepo: F401 per `import unused…` file; exit 3 when app/BREAK exists. */
 export const VERIFY_RUFF = `P=$(pwd -P); [ -f app/BREAK ] && exit 3; out=""; for f in app/*.py; do if head -n1 "$f" | grep -q '^import unused'; then out="$out\${out:+,}{\\"filename\\":\\"$P/$f\\",\\"code\\":\\"F401\\",\\"message\\":\\"unused import\\",\\"location\\":{\\"row\\":1},\\"end_location\\":{\\"row\\":1}}"; fi; done; printf '[%s]' "$out"`;
+
+/**
+ * Diff fixture (M6): a base commit with two lint findings (a, b), then a "PR" commit that
+ * touches b.py (its finding unchanged, so baselined) and adds d.py with a new finding.
+ * Use with VERIFY_RUFF.
+ */
+export async function makeDiffRepo(dir: string): Promise<FixtureRepo> {
+  mkdirSync(dir, { recursive: true });
+  await g(dir, ["init", "-q", "-b", "main"], "2026-04-01T00:00:00Z");
+  write(dir, "app/a.py", "import unused_a\ndef a():\n    return 1\n");
+  write(dir, "app/b.py", "import unused_b\ndef b():\n    return 1\n");
+  await g(dir, ["add", "-A"], "2026-04-01T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "base"], "2026-04-01T10:00:00Z");
+  const base = await g(dir, ["rev-parse", "HEAD"], "2026-04-01T10:00:00Z");
+  write(dir, "app/b.py", "import unused_b\ndef b():\n    return 2\n");
+  write(dir, "app/d.py", "import unused_d\ndef d():\n    return 1\n");
+  await g(dir, ["add", "-A"], "2026-04-02T00:00:00Z");
+  await g(dir, ["commit", "-q", "-m", "pr: change b, add d"], "2026-04-02T10:00:00Z");
+  return { dir, commits: [base, await g(dir, ["rev-parse", "HEAD"], "2026-04-02T10:00:00Z")] };
+}

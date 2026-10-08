@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { stringify } from "yaml";
 import { UsageError } from "../core/errors.js";
 import { parseYaml } from "../core/yaml.js";
-import { GIT_SHA, SLUG, makeValidator } from "../schemas/validate.js";
+import { GIT_SHA, SHA256, SLUG, makeValidator } from "../schemas/validate.js";
 import { RECIPE_SCHEMA, type BuildRecipe } from "../sandbox/recipe.js";
 
 export const ENGAGEMENT_TYPES = ["triage", "quality", "health-audit", "security", "due-diligence", "pr-review", "debug"] as const;
@@ -45,6 +45,11 @@ export interface EngagementDoc {
   readonly theme?: string;
   /** Opengrep rule packs: "authored" (radr's own), "pack" (permissive, vendored), "lgpl" (LGPL-3.0 sub-pack, pending counsel). Default: all three. */
   readonly rule_packs?: readonly ("authored" | "pack" | "lgpl")[];
+  /**
+   * The `diff` tier (M6): the PR's base commit, and the hash of baseline.json. Only findings in
+   * files changed in base...head, and not in the baseline, surface. Present iff tier is diff.
+   */
+  readonly diff?: { readonly base: string; readonly baseline: string };
 }
 
 const strArray = { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } as const;
@@ -88,6 +93,10 @@ const validate = makeValidator<EngagementDoc>(
       lint_modes: { type: "array", items: { enum: ["baseline", "project"] }, uniqueItems: true, minItems: 1 },
       theme: { type: "string", pattern: SLUG },
       rule_packs: { type: "array", items: { enum: ["authored", "pack", "lgpl"] }, uniqueItems: true, minItems: 1 },
+      diff: {
+        type: "object", additionalProperties: false, required: ["base", "baseline"],
+        properties: { base: { type: "string", pattern: GIT_SHA }, baseline: { type: "string", pattern: SHA256 } },
+      },
     },
   },
   UsageError,
@@ -95,6 +104,7 @@ const validate = makeValidator<EngagementDoc>(
 
 export function parseEngagement(text: string, source: string): EngagementDoc {
   const doc = validate(parseYaml(text, source), source);
+  if ((doc.tier === "diff") !== (doc.diff !== undefined)) throw new UsageError(`${source}: the diff tier needs a diff block (base, baseline), and only the diff tier may have one (radr scope --base <ref>)`);
   if (doc.lanes.length === 0 && doc.engagement_type !== "debug") throw new UsageError(`${source}: /lanes must NOT have fewer than 1 items (only a debug engagement may have no lanes)`);
   if (doc.tier === "triage") {
     const same = doc.lanes.length === TRIAGE_LANES.length && TRIAGE_LANES.every((x) => doc.lanes.includes(x));

@@ -90,13 +90,17 @@ export interface IngestResult {
   /** Existing findings whose assessment or location changed (appended as new records). */
   readonly updated: number;
   readonly outOfScope: number;
+  /** Diff tier: in scope, but outside the change or already in the baseline. */
+  readonly suppressed: number;
   readonly setHash: string;
 }
 
 /** Filter to scope, fingerprint, assign stable ids, apply the rubric, and append to the store. */
-export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: Rubric, drafts: readonly FindingDraft[], vulns: VulnContext = NO_VULN_CONTEXT): IngestResult {
+export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: Rubric, drafts: readonly FindingDraft[], vulns: VulnContext = NO_VULN_CONTEXT, keep?: (fingerprint: string, d: FindingDraft) => boolean): IngestResult {
   const inScopeDrafts = drafts.filter((d) => inScope(d.file, doc.paths));
-  const prints = fingerprintDrafts(inScopeDrafts);
+  // Fingerprint over every in-scope draft (occurrence numbering must not depend on the filter).
+  const all = fingerprintDrafts(inScopeDrafts);
+  const prints = keep === undefined ? all : all.filter((p) => keep(p.fingerprint, p.draft));
   const store = readStore(file);
   const byFingerprint = new Map(store.findings.map((f) => [f.fingerprint, f]));
   let nextId = store.findings.reduce((max, f) => Math.max(max, Number.parseInt(f.id.slice(2), 10)), 0) + 1;
@@ -126,7 +130,7 @@ export function ingest(file: string, runId: string, doc: EngagementDoc, rubric: 
   const ids = stableSort(present.map((f) => f.id), (id) => id);
   const lines = [...added, ...updated, { type: "run-findings", run_id: runId, finding_ids: ids } satisfies RunFindings].map((r) => `${canonicalJson(r)}\n`);
   appendFileSync(file, lines.join(""));
-  return { present, added: added.length, updated: updated.length, outOfScope: drafts.length - inScopeDrafts.length, setHash: findingsSetHash(present) };
+  return { present, added: added.length, updated: updated.length, outOfScope: drafts.length - inScopeDrafts.length, suppressed: all.length - prints.length, setHash: findingsSetHash(present) };
 }
 
 /**
