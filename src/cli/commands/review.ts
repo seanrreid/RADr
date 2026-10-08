@@ -26,6 +26,7 @@ import { Gates } from "../../state/gates.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CliContext, CommandSpec } from "../context.js";
 
+const SHOW_SKIPPED = 5;
 const sevRank = (s: string): number => SEVERITIES.indexOf(s as Finding["severity"]);
 
 export const review: CommandSpec = {
@@ -168,8 +169,15 @@ export const disposition: CommandSpec = {
       log.append("finding-disposition", actor, { finding_id: f.id, from, to, reason });
       applied++;
     }
-    if (applied === 0) throw new RefusedError(`no matched finding can move to ${to}: ${skipped.join(", ")}`);
-    ctx.out(`${applied} finding(s) → ${to}${skipped.length > 0 ? `; skipped ${skipped.length}: ${skipped.join(", ")}` : ""}`);
+    // Summarize skips by state; list ids only when there are few (dogfood: 90 ids on one line).
+    const bySkip = new Map<string, string[]>();
+    for (const x of skipped) {
+      const [id = "", state = ""] = x.split(" (");
+      bySkip.set(state.replace(")", ""), [...(bySkip.get(state.replace(")", "")) ?? []), id]);
+    }
+    const skipText = stableSort([...bySkip], ([st]) => st).map(([st, ids]) => `${String(ids.length)} already ${st}${ids.length <= SHOW_SKIPPED ? ` (${ids.join(", ")})` : ""}`).join(", ");
+    if (applied === 0) throw new RefusedError(`no matched finding can move to ${to}: ${skipText}`);
+    ctx.out(`${applied} finding(s) → ${to}${skipped.length > 0 ? `; skipped ${skipText}` : ""}`);
   },
 };
 

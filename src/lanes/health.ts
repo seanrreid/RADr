@@ -28,6 +28,16 @@ const DOCKERFILE = /(^|\/)(Dockerfile|Containerfile)(\.[^/]+)?$|\.(dockerfile|co
 /** Every lane step that can't run (no inputs) is a success with no findings. */
 const skipped = (detail?: string): StepOutcome => ({ outcome: "success", findings: [], ...(detail !== undefined ? { detail } : {}) });
 
+/**
+ * Not code, so not duplication: VCS and dependency dirs, generated lockfiles, and docs (jscpd
+ * reads code blocks inside Markdown). Dogfood 2026-10-08: a pnpm lockfile was 81 of 204 clones.
+ */
+export const JSCPD_IGNORE = [
+  "**/.git/**", "**/node_modules/**",
+  "**/pnpm-lock.yaml", "**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/bun.lock", "**/*.lock", "**/go.sum", "**/gradle.lockfile",
+  "**/*.md", "**/*.mdx", "**/*.markdown",
+].join(",");
+
 export const maint: Lane = {
   id: "maint",
   tools: ["lizard", "node-tools"],
@@ -63,7 +73,7 @@ export const maint: Lane = {
       () => ctx.tools.exec({
         command: ctx.tools.node,
         args: [path.join(ctx.tools.nodeTools, "node_modules", "jscpd", "run-jscpd.js"), "--config", config, "--reporters", "json", "--output", out,
-          "--silent", "--min-lines", "5", "--min-tokens", "50", "--ignore", "**/.git/**,**/node_modules/**", "."],
+          "--silent", "--min-lines", "5", "--min-tokens", "50", "--ignore", JSCPD_IGNORE, "."],
         cwd: wt, env: toolEnv(ctx), timeoutMs: 30 * 60 * 1000,
       }),
       (raw, ref) => {

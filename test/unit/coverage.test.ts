@@ -5,7 +5,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { computeScorecard } from "../../src/address/scorecard.js";
+import { JSCPD_IGNORE } from "../../src/lanes/health.js";
 import { TEST_GLOBS } from "../../src/lanes/metrics.js";
+import { jscpdAdapter } from "../../src/normalize/health-adapters.js";
 import { matchesAny } from "../../src/core/glob.js";
 import { coverageGaps, lockfiles, sastCoverage } from "../../src/review/coverage.js";
 import { loadRubric } from "../../src/rubric/rubric.js";
@@ -90,5 +92,17 @@ describe("test-file conventions", () => {
       assert.ok(matchesAny(f, TEST_GLOBS), f);
     }
     for (const f of ["mac/Sources/SeanboyCore/NoteStore.swift", "src/App/Order.cs", "src/contest.ts"]) assert.ok(!matchesAny(f, TEST_GLOBS), f);
+  });
+});
+
+describe("duplication ignores what isn't code (dogfood: killing_dinos_app)", () => {
+  it("jscpd skips lockfiles and docs; a Markdown code block maps back to its file", () => {
+    for (const g of ["**/pnpm-lock.yaml", "**/package-lock.json", "**/yarn.lock", "**/*.md"]) assert.ok(JSCPD_IGNORE.split(",").includes(g), g);
+    const raw = JSON.stringify({
+      statistics: { total: { lines: 100, duplicatedLines: 10 } },
+      duplicates: [{ format: "typescript", lines: 5, firstFile: { name: "/repo/agents.md:typescript", start: 3, end: 7 }, secondFile: { name: "/repo/src/a.ts", start: 1, end: 5 } }],
+    });
+    const r = jscpdAdapter({ raw, rawRef: "raw/jscpd.json", repoRoot: "/repo", toolVersion: "t", snippet: () => null });
+    assert.equal(r.findings[0]?.file, "agents.md");
   });
 });

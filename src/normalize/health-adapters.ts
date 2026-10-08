@@ -90,6 +90,11 @@ export interface JscpdMetrics {
 }
 
 /** jscpd `--reporters json` report: duplicates[] + statistics.total (integer fields only). */
+/** jscpd names a code block inside Markdown "<file>.md:<format>"; the finding is the file. */
+function jscpdPath(name: string): string {
+  return name.replace(/(\.(?:md|mdx|markdown)):[A-Za-z0-9+#-]+$/, "$1");
+}
+
 export function jscpdAdapter(input: AdapterInput): { findings: FindingDraft[]; metrics: JscpdMetrics } {
   const root = obj(parseJson(input.raw, "jscpd"), "jscpd");
   const total = obj(obj(root["statistics"], "jscpd.statistics")["total"], "jscpd.statistics.total");
@@ -99,8 +104,8 @@ export function jscpdAdapter(input: AdapterInput): { findings: FindingDraft[]; m
     const d = obj(entry, `jscpd.duplicates[${i}]`);
     const a = obj(d["firstFile"], "jscpd firstFile");
     const b = obj(d["secondFile"], "jscpd secondFile");
-    const fileA = repoPath(str(a["name"], "jscpd firstFile.name"), input.repoRoot);
-    const fileB = repoPath(str(b["name"], "jscpd secondFile.name"), input.repoRoot);
+    const fileA = repoPath(jscpdPath(str(a["name"], "jscpd firstFile.name")), input.repoRoot);
+    const fileB = repoPath(jscpdPath(str(b["name"], "jscpd secondFile.name")), input.repoRoot);
     const [startA, endA] = [int(a["start"], "jscpd start"), int(a["end"], "jscpd end")];
     const [startB, endB] = [int(b["start"], "jscpd start"), int(b["end"], "jscpd end")];
     const n = int(d["lines"], "jscpd lines");
