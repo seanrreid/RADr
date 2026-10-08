@@ -190,6 +190,9 @@ describe("M3 W5 stack sandboxes end-to-end (real runtime)", { skip: ENABLED ? fa
     const { mkdirSync, writeFileSync } = await import("node:fs");
     mkdirSync(home);
     symlinkSync(path.join(TOOLS_HOME ?? "", "tools"), path.join(home, "tools"));
+    // Scoping needs an OSV snapshot (the sca lane): build one offline from a vendored advisory.
+    const osv = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/fixtures/osv");
+    await syncOsv(home, fixedClock("2026-10-01T00:00:00Z"), () => Promise.resolve(zipStored({ "GHSA-35jh-r3h4-6jhm.json": readFileSync(path.join(osv, "GHSA-35jh-r3h4-6jhm.json")) })));
     const radr = async (...args: string[]) => {
       const env: Record<string, string> = { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" };
       for (const k of PASS) { const v = process.env[k]; if (v !== undefined) env[k] = v; }
@@ -232,6 +235,9 @@ describe("M5 debug end-to-end (real runtime)", { skip: ENABLED ? false : "set RA
     const home = path.join(root, "home");
     mkdirSync(home);
     symlinkSync(path.join(TOOLS_HOME ?? "", "tools"), path.join(home, "tools"));
+    // Scoping needs an OSV snapshot (the sca lane): build one offline from a vendored advisory.
+    const osv = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../test/fixtures/osv");
+    await syncOsv(home, fixedClock("2026-10-01T00:00:00Z"), () => Promise.resolve(zipStored({ "GHSA-35jh-r3h4-6jhm.json": readFileSync(path.join(osv, "GHSA-35jh-r3h4-6jhm.json")) })));
     const radr = async (...args: string[]) => {
       const env: Record<string, string> = { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" };
       for (const k of PASS) { const v = process.env[k]; if (v !== undefined) env[k] = v; }
