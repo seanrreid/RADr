@@ -15,9 +15,9 @@ what needs hands-on work.
   timezone, or locale.
 
 See [PRD.md](PRD.md) for the full design. Milestone plans with as-built notes:
-[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md).
+[M1](docs/m1-plan.md), [M2](docs/m2-plan.md), [M3](docs/m3-plan.md), [M4](docs/m4-plan.md), [M5](docs/m5-plan.md).
 
-**Status: M4.** Read and Address work for **TS/JS, Python, Go, Rust,
+**Status: M5.** Read, Address and Debug work for **TS/JS, Python, Go, Rust,
 JVM (Java/Kotlin), PHP, Ruby, and .NET**:
 
 - the deterministic core
@@ -35,8 +35,10 @@ JVM (Java/Kotlin), PHP, Ruby, and .NET**:
 - **an optional LLM lane** (per engagement): explanations, clusters and proposed
   dispositions; judgment findings a person must confirm; drafts of the report's prose
   blocks. The model never sets severity or makes a decision.
+- **Debug:** a root-cause workflow for one bug. Reproduce in the sandbox, bisect, test
+  hypotheses with recorded experiments, conclude (gated), and deliver a regression test.
 
-Still to come: the LLM lane (M4, in progress), Debug (M5), and PR review and verify (M6).
+Still to come: PR review and `radr verify` (M6).
 
 ## Requirements
 
@@ -89,6 +91,35 @@ radr address --draft                        # optional: LLM drafts of untouched 
 radr approve report                         # Gate 2 (or --accept-partial "<reason>")
 radr render                                 # report.pdf + remediation.pdf
 ```
+
+## Debug
+
+A root-cause workflow for one bug, inside an engagement with an approved scope: from a
+finding (`--from-finding F-0003`) or an issue (`--issue "…"`). For a debug on its own, use
+`engagement_type: debug` with `lanes: []`. Every step is a sandbox run or a recorded
+decision, and gates enforce the order.
+
+```bash
+radr debug open --issue "checkout total is off by one cent" --expected "…" --actual "…"
+$EDITOR debug/D-0001/repro/repro.sh         # exit 0 = bug absent, 125 = can't tell, else present
+radr debug repro D-0001                     # runs in the build sandbox at the approved commit
+radr debug bisect D-0001 --good v2.3.0      # first bad commit (≤ 512 candidates; skips → a range)
+radr debug propose D-0001 "rounding happens before tax"
+radr debug experiment D-0001 --hypothesis H-0001 rounding.sh   # debug/D-0001/experiments/rounding.sh
+radr debug decide D-0001 H-0001 confirmed --run DR-0004 --reason "…"
+radr debug conclude D-0001 root-caused --hypothesis H-0001 --summary "…" [--to-plan]
+radr debug guard D-0001 [--fix-commit <sha>]  # guard/test.patch must fail without the fix, pass with it
+radr debug show D-0001                      # or: radr debug report D-0001 → debug/D-0001/root-cause.md
+```
+
+- **Gates:** a hypothesis is decided only by an experiment recorded against it, and
+  confirmed only after the bug was reproduced. A root cause needs a reproducing run and a
+  confirmed hypothesis. "Cannot reproduce" is a valid conclusion, with the attempts on record.
+- **The repro is frozen once it reproduces:** bisect and the guard rerun exactly that script.
+- **radr never writes the fix.** The consultant supplies `guard/fix.patch` (or a fix commit);
+  `guard/test.patch` is the deliverable.
+- `radr debug suggest D-0001` (LLM policy permitting) proposes hypotheses and experiments,
+  labelled `[LLM]`. They're proposals like any other.
 
 For a quick **"is this any good?"** verdict, set `engagement_type: triage` and
 `tier: triage` in `engagement.yml`. Triage runs a fixed set of fast static lanes, scans
@@ -164,6 +195,7 @@ marked partial (`policy/matrix.yml`, row `llm`).
 | Secrets are never written in clear | gitleaks runs with `--redact`, and the adapter refuses unredacted output. |
 | Severity is never guessed | The rubric maps every (tool, severity) pair explicitly. Unmapped pairs refuse. |
 | Same scope, same findings | The findings-set hash is identical across homes, `TZ`, and `LANG` (tested end to end). |
+| Debug conclusions rest on evidence | Every repro, bisect step, experiment and guard run is a sandbox run whose script, log and exit code are hashed into the event log. Root cause needs a reproducing run and a confirmed hypothesis (invariant 7). |
 | The LLM proposes, people decide | Under policy `off` the agent is never spawned. Agent output can't set a severity, a disposition, or a gate (ESLint boundary + an adversarial eval). Judgment findings are kept apart from tool findings, so they never change the findings-set hash. |
 | You can audit what left the machine | Every prompt and response is stored in `llm/`, hash-linked from an `llm-call` event. A `metadata-only` prompt quotes no client code (checked against the whole repo in tests). |
 

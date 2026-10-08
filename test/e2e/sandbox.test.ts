@@ -7,11 +7,11 @@
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, symlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "../../src/core/exec.js";
-import { makeFixtureRepo, makeHealthFixtureRepo, makeSandboxFixtureRepo, makeStackSandboxRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
+import { REGRESSION_BAD_INDEX, REGRESSION_REPRO, makeFixtureRepo, makeHealthFixtureRepo, makeRegressionRepo, makeSandboxFixtureRepo, makeStackSandboxRepo, type FixtureRepo } from "../helpers/fixture-repo.js";
 import { tmpDir } from "../helpers/tmp.js";
 import { zipStored } from "../helpers/zip.js";
 import { syncOsv } from "../../src/toolchain/db.js";
@@ -222,5 +222,53 @@ describe("M3 W5 stack sandboxes end-to-end (real runtime)", { skip: ENABLED ? fa
     assert.equal(cov.stacks["go"]?.status, "stable");
     assert.equal(typeof cov.stacks["go"].line_pct, "number");
     for (const s of ["rust", "java-kotlin", "ruby"]) assert.equal(cov.stacks[s]?.status, "stable", s);
+  });
+});
+
+describe("M5 debug end-to-end (real runtime)", { skip: ENABLED ? false : "set RADR_E2E_TOOLS and RADR_E2E_SANDBOX=1" }, () => {
+  it("repro, bisect, experiment, conclusion and guard all run in the real sandbox (AC2, AC4–AC7)", { timeout: 30 * 60 * 1000 }, async () => {
+    const root = tmpDir("radr-e2e-dbg-");
+    const repo = await makeRegressionRepo(path.join(root, "calc"));
+    const home = path.join(root, "home");
+    mkdirSync(home);
+    symlinkSync(path.join(TOOLS_HOME ?? "", "tools"), path.join(home, "tools"));
+    const radr = async (...args: string[]) => {
+      const env: Record<string, string> = { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" };
+      for (const k of PASS) { const v = process.env[k]; if (v !== undefined) env[k] = v; }
+      const r = await run({ command: process.execPath, args: [bin, ...args, "-e", "acme-calc"], cwd: root, env, timeoutMs: 20 * 60 * 1000, okExitCodes: [0, 1, 2, 3] });
+      return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+    };
+    const step = async (...args: string[]) => {
+      const r = await radr(...args);
+      assert.equal(r.code, 0, `radr ${args.join(" ")}:\n${r.out}\n${r.err}`);
+      return r.out;
+    };
+    const init = await run({ command: process.execPath, args: [bin, "init", "acme", "calc"], cwd: root, env: { RADR_HOME: home, RADR_ACTOR: "e2e@example.com" } });
+    assert.equal(init.exitCode, 0);
+    await step("scope", "--source", repo.dir);
+    await step("deps", "warm");
+    await step("scope");
+    await step("approve", "scope");
+    await step("debug", "open", "--issue", "add(2, 2) returns 5");
+    const dbg = path.join(home, "engagements", "acme-calc", "debug", "D-0001");
+    writeFileSync(path.join(dbg, "repro", "repro.sh"), REGRESSION_REPRO);
+    assert.match(await step("debug", "repro", "D-0001"), /exited 1 → bug present \(reproduced\)/);
+
+    const b = await step("debug", "bisect", "D-0001", "--good", repo.commits[0] ?? "");
+    assert.match(b, new RegExp(`first bad commit: ${repo.commits[REGRESSION_BAD_INDEX] ?? ""} speed up add`));
+
+    await step("debug", "propose", "D-0001", "add() special-cases equal operands");
+    writeFileSync(path.join(dbg, "experiments", "eq.sh"), `#!/bin/sh\nnode -e "process.exit(require('./src/math.js').add(3, 3) === 6 ? 0 : 1)"\n`);
+    const x = /(DR-\d{4}): experiment/.exec(await step("debug", "experiment", "D-0001", "--hypothesis", "H-0001", "eq.sh"))?.[1] ?? "";
+    await step("debug", "decide", "D-0001", "H-0001", "confirmed", "--run", x, "--reason", "add(3, 3) is 7 too");
+    await step("debug", "conclude", "D-0001", "root-caused", "--hypothesis", "H-0001", "--summary", "add() adds one for equal operands.");
+
+    writeFileSync(path.join(dbg, "guard", "test.patch"), `diff --git a/test/add.test.js b/test/add.test.js\nnew file mode 100644\n--- /dev/null\n+++ b/test/add.test.js\n@@ -0,0 +1,4 @@\n+const { test } = require("node:test");\n+const assert = require("node:assert");\n+const { add } = require("../src/math.js");\n+test("add(2, 2) is 4", () => assert.equal(add(2, 2), 4));\n`);
+    writeFileSync(path.join(dbg, "guard", "guard.sh"), "#!/bin/sh\nnode --test test/add.test.js\n");
+    writeFileSync(path.join(dbg, "guard", "fix.patch"), `diff --git a/src/math.js b/src/math.js\n--- a/src/math.js\n+++ b/src/math.js\n@@ -1,3 +1,3 @@\n-const add = (a, b) => a + b + (a === b ? 1 : 0);\n+const add = (a, b) => a + b;\n const mul = (a, b) => a * b;\n module.exports = { add, mul };\n`);
+    assert.match(await step("debug", "guard", "D-0001"), /guard holds/);
+    const record = readFileSync(path.join(dbg, "root-cause.md"), "utf8");
+    assert.match(record, new RegExp(`\\| Introducing commit \\| \`${repo.commits[REGRESSION_BAD_INDEX] ?? ""}\` \\|`));
+    assert.match(record, /\| guard-with-fix \| `[0-9a-f]{12}` \| 0 \| absent \|/);
   });
 });
