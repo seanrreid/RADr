@@ -92,6 +92,10 @@ radr address                                # report.md + remediation.md (edit t
 radr address --draft                        # optional: LLM drafts of untouched prose blocks
 radr approve report                         # Gate 2 (or --accept-partial "<reason>")
 radr render                                 # report.pdf + remediation.pdf
+
+# Across engagements
+radr insights rules                         # false-positive rate per rule, from your dispositions
+radr insights rules --rule opengrep/<id>    # every dismissal of one rule, with its reason
 ```
 
 ## Verify and PR review
