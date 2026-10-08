@@ -25,6 +25,7 @@ export interface DebugRun {
   readonly exitCode: number | null;
   readonly outcome: RunOutcome;
   readonly logRef: string;
+  readonly logHash: string;
   readonly hypothesisId?: string;
 }
 
@@ -91,7 +92,7 @@ export function debugStates(events: readonly Event[]): Map<string, DebugState> {
         update(id, (s) => ({
           ...s, runs: [...s.runs, {
             runId: String(d["run_id"]), kind: d["kind"] as RunKind, commit: String(d["commit"]), scriptHash: String(d["script_hash"]),
-            exitCode: typeof d["exit_code"] === "number" ? d["exit_code"] : null, outcome: d["outcome"] as RunOutcome, logRef: String(d["log_ref"]),
+            exitCode: typeof d["exit_code"] === "number" ? d["exit_code"] : null, outcome: d["outcome"] as RunOutcome, logRef: String(d["log_ref"]), logHash: String(d["log_hash"]),
             ...some("hypothesisId", d["hypothesis_id"]),
           }],
         }));

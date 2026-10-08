@@ -8,7 +8,9 @@ import { RefusedError, UsageError } from "../../core/errors.js";
 import { bisect } from "../../debug/bisect.js";
 import { debugSandbox, runDebugScript, scriptHash } from "../../debug/sandbox.js";
 import { gitOut } from "../../engagement/git.js";
-import { assertOpen, getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
+import { writeRootCause } from "../../debug/report.js";
+import { assertCanConclude, assertCanDecide, assertOpen, getDebug, debugStates, nextId, reproducing, type DebugState } from "../../debug/state.js";
+import { resolveSha } from "../../engagement/source.js";
 import { radrHome, resolveEngagement, type Layout } from "../../engagement/home.js";
 import { readJudgments } from "../../findings/judgments.js";
 import { readStore } from "../../findings/store.js";
@@ -18,7 +20,7 @@ import { Gates } from "../../state/gates.js";
 import { ENGAGEMENT_OPTION, parse } from "../args.js";
 import type { CliContext, CommandSpec } from "../context.js";
 
-const SUBCOMMANDS = ["open", "list", "show", "repro", "bisect"] as const;
+const SUBCOMMANDS = ["open", "list", "show", "repro", "bisect", "propose", "experiment", "decide", "conclude", "report"] as const;
 
 /** debug/<id>/ and its evidence folders. */
 export function debugDir(l: Layout, id: string): { root: string; repro: string; experiments: string; guard: string; runs: string } {
@@ -98,6 +100,88 @@ async function bisectCmd(args: readonly string[], ctx: CliContext): Promise<void
   }
 }
 
+async function propose(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION }, 2);
+  const [id = "", text = ""] = positionals;
+  if (text.trim() === "") throw new UsageError("the hypothesis can't be empty");
+  const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const events = log.read();
+  const d = getDebug(events, id);
+  assertOpen(d);
+  const hid = nextId(events, "H");
+  log.append("hypothesis-proposed", await resolveActor(ctx.env), { debug_id: d.id, hypothesis_id: hid, text: text.trim(), source: "consultant" });
+  ctx.out(`${hid} proposed for ${d.id}: ${text.trim()}`);
+  ctx.out(`test it: write ${path.join(debugDir(l, d.id).experiments, "<name>.sh")}, then radr debug experiment ${d.id} --hypothesis ${hid} <name>.sh`);
+}
+
+async function experiment(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, hypothesis: { type: "string" }, stack: { type: "string" } }, 2);
+  const [id = "", name = ""] = positionals;
+  if (values.hypothesis === undefined) throw new UsageError("an experiment tests a hypothesis: --hypothesis <H-id>");
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new UsageError(`"${name}" isn't a script name in the debug's experiments/ folder`);
+  const home = radrHome(ctx.env);
+  const l = resolveEngagement(home, values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const { doc } = await assertScope(l, Gates.load(), log);
+  const d = getDebug(log.read(), id);
+  assertOpen(d);
+  if (!d.hypotheses.some((h) => h.id === values.hypothesis && h.state === "proposed")) throw new RefusedError(`${values.hypothesis} is not an undecided hypothesis of ${d.id}`);
+  const sb = await debugSandbox(home, l, doc, ctx.env, snapshotsFor(home, l).depsCache, values.stack);
+  const r = await runDebugScript(l, log, await resolveActor(ctx.env), sb, {
+    debugId: d.id, kind: "experiment", commit: d.commit, worktree: l.worktree, script: path.join(debugDir(l, d.id).experiments, name), hypothesisId: values.hypothesis,
+  });
+  ctx.out(`${r.runId}: experiment ${name} for ${values.hypothesis} exited ${String(r.exitCode)} (${r.outcome}); log ${r.logRef}`);
+  ctx.out(`decide with it: radr debug decide ${d.id} ${values.hypothesis} confirmed|refuted --run ${r.runId} --reason "…"`);
+}
+
+async function decide(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, run: { type: "string" }, reason: { type: "string" } }, 3);
+  const [id = "", hid = "", to = ""] = positionals;
+  if (to !== "confirmed" && to !== "refuted") throw new UsageError(`a hypothesis is confirmed or refuted, not "${to}"`);
+  if (values.run === undefined) throw new UsageError("cite the experiment run that decides it: --run <DR-id>");
+  if (values.reason === undefined || values.reason.trim() === "") throw new UsageError("a decision needs --reason");
+  const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const d = getDebug(log.read(), id);
+  assertCanDecide(d, hid, to, values.run);
+  log.append("hypothesis-decided", await resolveActor(ctx.env), { debug_id: d.id, hypothesis_id: hid, to, run_id: values.run, reason: values.reason.trim() });
+  ctx.out(`${hid}: ${to} (by ${values.run})`);
+}
+
+async function conclude(args: readonly string[], ctx: CliContext): Promise<void> {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION, hypothesis: { type: "string" }, summary: { type: "string" }, commit: { type: "string" } }, 2);
+  const [id = "", outcome = ""] = positionals;
+  if (outcome !== "root-caused" && outcome !== "cannot-reproduce") throw new UsageError(`a debug concludes root-caused or cannot-reproduce, not "${outcome}"`);
+  if (values.summary === undefined || values.summary.trim() === "") throw new UsageError("a conclusion needs --summary");
+  const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+  const log = new EventLog(l.events, ctx.clock);
+  const d = getDebug(log.read(), id);
+  assertCanConclude(d, outcome, values.hypothesis);
+  // The introducing commit: given, else the bisect's single first-bad commit.
+  let introducing: string | undefined;
+  if (values.commit !== undefined) introducing = await resolveSha(l.mirror, values.commit);
+  else if (outcome === "root-caused" && d.bisect?.firstBad.length === 1) introducing = d.bisect.firstBad[0];
+  log.append("debug-concluded", await resolveActor(ctx.env), {
+    debug_id: d.id, outcome, summary: values.summary.trim(),
+    ...(outcome === "root-caused" && values.hypothesis !== undefined ? { hypothesis_id: values.hypothesis } : {}),
+    ...(introducing !== undefined ? { introducing_commit: introducing } : {}),
+  });
+  const file = path.join(debugDir(l, d.id).root, "root-cause.md");
+  writeRootCause(file, getDebug(log.read(), d.id), l.id);
+  ctx.out(`${d.id} concluded ${outcome}${introducing !== undefined ? ` (introduced by ${introducing.slice(0, 12)})` : ""}`);
+  ctx.out(`  record: ${file}`);
+}
+
+function report(args: readonly string[], ctx: CliContext): void {
+  const { values, positionals } = parse(args, { ...ENGAGEMENT_OPTION }, 1);
+  const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
+  const d = getDebug(new EventLog(l.events, ctx.clock).read(), positionals[0] ?? "");
+  const file = path.join(debugDir(l, d.id).root, "root-cause.md");
+  writeRootCause(file, d, l.id);
+  ctx.out(file);
+}
+
 function list(args: readonly string[], ctx: CliContext): void {
   const { values } = parse(args, { ...ENGAGEMENT_OPTION }, 0);
   const l = resolveEngagement(radrHome(ctx.env), values.engagement, ctx.env, ctx.cwd);
@@ -148,6 +232,13 @@ export const debug: CommandSpec = {
         return;
       case "repro": return repro(rest, ctx);
       case "bisect": return bisectCmd(rest, ctx);
+      case "propose": return propose(rest, ctx);
+      case "experiment": return experiment(rest, ctx);
+      case "decide": return decide(rest, ctx);
+      case "conclude": return conclude(rest, ctx);
+      case "report":
+        report(rest, ctx);
+        return;
       default: throw new UsageError(`unknown debug subcommand "${sub ?? ""}" (expected: ${SUBCOMMANDS.join(", ")})`);
     }
   },

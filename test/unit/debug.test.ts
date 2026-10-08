@@ -294,3 +294,57 @@ describe("bisect (M5 W2)", () => {
     assert.equal(t.log.read().filter((e) => e.type === "debug-bisected").length, 0);
   });
 });
+
+describe("hypotheses, conclusion and root-cause.md (M5 W3)", () => {
+  it("walks the method end to end and writes a record that regenerates byte-identically", async () => {
+    const t = await opened();
+    const bad = t.repo.commits.at(-1) ?? "";
+    const e = (...a: string[]) => t.radr("debug", ...a, "-e", "acme-calc");
+    await runDebugScript(t.l, t.log, "c", t.sb(), t.spec(t.l.worktree, bad));
+    assert.match((await e("propose", "D-0001", "add() special-cases equal operands")).out, /^H-0001 proposed for D-0001/);
+    assert.equal((await e("experiment", "D-0001", "--hypothesis", "H-0009", "eq.sh")).code, 1, "unknown hypothesis");
+
+    const eq = path.join(t.l.debug, "D-0001", "experiments", "eq.sh");
+    writeFileSync(eq, `#!/bin/sh\nnode -e "process.exit(require('./src/math.js').add(3, 3) === 6 ? 0 : 1)"\n`);
+    const x = await runDebugScript(t.l, t.log, "c", t.sb(), { debugId: "D-0001", kind: "experiment", commit: bad, worktree: t.l.worktree, script: eq, hypothesisId: "H-0001" });
+    assert.equal(x.outcome, "present");
+    assert.equal((await e("decide", "D-0001", "H-0001", "confirmed", "--run", "DR-0001", "--reason", "r")).code, 1, "a repro run isn't an experiment");
+    assert.equal((await e("conclude", "D-0001", "root-caused", "--summary", "s")).code, 1, "names no confirmed hypothesis");
+    const dec = await e("decide", "D-0001", "H-0001", "confirmed", "--run", x.runId, "--reason", "add(3, 3) is 7 as well");
+    assert.equal(dec.code, 0, dec.err);
+    await bisect(t.l, t.log, "c", t.sb(), getDebug(t.log.read(), "D-0001"), t.repo.commits[0] ?? "", t.script);
+    assert.equal((await e("conclude", "D-0001", "cannot-reproduce", "--summary", "s")).code, 1, "it was reproduced");
+
+    const c = await e("conclude", "D-0001", "root-caused", "--hypothesis", "H-0001", "--summary", "add() adds one when both operands are equal.");
+    assert.equal(c.code, 0, c.err);
+    assert.match(c.out, new RegExp(`introduced by ${(t.repo.commits[REGRESSION_BAD_INDEX] ?? "").slice(0, 12)}`));
+    assert.equal((await e("propose", "D-0001", "another idea")).code, 1, "a concluded debug takes nothing more");
+
+    const file = path.join(t.l.debug, "D-0001", "root-cause.md");
+    const first = readFileSync(file, "utf8");
+    assert.match(first, /^---\ntitle: "Root cause: D-0001"/);
+    assert.match(first, /outcome: "root-caused"/);
+    assert.match(first, new RegExp(`\\| Introducing commit \\| \`${t.repo.commits[REGRESSION_BAD_INDEX] ?? ""}\` \\|`));
+    assert.match(first, /\| H-0001 \| confirmed \| add\(\) special-cases equal operands \| DR-0002: add\(3, 3\) is 7 as well \|/);
+    assert.match(first, /# Localization\n\nBisected between/);
+    writeFileSync(file, first.replace("_How the defect produces the symptom. Preserved across regeneration._", "The fast path adds a stray 1."));
+    await e("report", "D-0001");
+    const kept = readFileSync(file, "utf8");
+    assert.match(kept, /The fast path adds a stray 1\./);
+    await e("report", "D-0001");
+    assert.equal(readFileSync(file, "utf8"), kept, "regeneration is byte-identical");
+    assert.match((await e("list")).out, /D-0001 {2}root-caused/);
+  });
+
+  it("cannot-reproduce: allowed after attempts that never reproduced", async () => {
+    const t = await opened();
+    const e = (...a: string[]) => t.radr("debug", ...a, "-e", "acme-calc");
+    assert.equal((await e("conclude", "D-0001", "cannot-reproduce", "--summary", "s")).code, 1, "no attempt yet");
+    // An attempt at the debug's own commit that doesn't reproduce: a repro that never fails.
+    writeFileSync(t.script, "#!/bin/sh\nexit 0\n");
+    await runDebugScript(t.l, t.log, "c", t.sb(), t.spec(t.l.worktree, t.repo.commits.at(-1) ?? ""));
+    const c = await e("conclude", "D-0001", "cannot-reproduce", "--summary", "Tried on the approved commit; add(2, 2) was 4.");
+    assert.equal(c.code, 0, c.err);
+    assert.match(readFileSync(path.join(t.l.debug, "D-0001", "root-cause.md"), "utf8"), /outcome: "cannot-reproduce"/);
+  });
+});
